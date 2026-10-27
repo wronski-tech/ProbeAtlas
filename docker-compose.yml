@@ -1,0 +1,142 @@
+# Local development environment for ProbeAtlas.
+#
+#   docker compose up -d --build        # start everything
+#   open http://localhost:3000          # dashboard
+#   docker compose down                 # stop (add -v to delete data)
+#
+# Two agents run on this machine with region labels dev-local-a / dev-local-b.
+# They are real agents producing real measurements, but they share one host and
+# network: they do NOT represent geographically distinct locations.
+
+name: probeatlas
+
+x-server-env: &server-env
+  PROBEATLAS_ENV: development
+  PROBEATLAS_DATABASE_URL: postgresql+psycopg://probeatlas:probeatlas@db:5432/probeatlas
+  # Development-only: lets monitors target the demo-target container by name.
+  PROBEATLAS_ALLOW_PRIVATE_TARGETS: "true"
+  PROBEATLAS_BOOTSTRAP_ENROLLMENT_TOKEN: ${PROBEATLAS_BOOTSTRAP_ENROLLMENT_TOKEN:-pae_local-dev-only-enrollment-token}
+  PROBEATLAS_MIN_INTERVAL_SECONDS: "10"
+  PROBEATLAS_WEBHOOK_ALLOWED_PRIVATE_CIDRS: ${PROBEATLAS_WEBHOOK_ALLOWED_PRIVATE_CIDRS:-}
+  PROBEATLAS_LOG_LEVEL: INFO
+
+x-agent: &agent
+  build: { context: ., dockerfile: deploy/Dockerfile.agent }
+  image: probeatlas-agent:dev
+  restart: unless-stopped
+  depends_on:
+    api: { condition: service_healthy }
+  cap_drop: [ALL]
+  read_only: true
+  security_opt: ["no-new-privileges:true"]
+  sysctls:
+    net.ipv4.ping_group_range: "0 2147483647"
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: probeatlas
+      POSTGRES_PASSWORD: probeatlas
+      POSTGRES_DB: probeatlas
+    ports: ["127.0.0.1:5432:5432"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U probeatlas"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    networks: [control]
+
+  migrate:
+    build: { context: ., dockerfile: deploy/Dockerfile.server }
+    image: probeatlas-server:dev
+    command: ["probeatlas-admin", "migrate"]
+    environment: *server-env
+    depends_on:
+      db: { condition: service_healthy }
+    networks: [control]
+
+  api:
+    image: probeatlas-server:dev
+    command: ["probeatlas-api"]
+    environment: *server-env
+    ports: ["8000:8000"]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/readyz')"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+    networks: [control]
+
+  worker:
+    image: probeatlas-server:dev
+    command: ["probeatlas-worker"]
+    environment: *server-env
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+    ports: ["127.0.0.1:9100:9100"]
+    restart: unless-stopped
+    networks: [control]
+
+  web:
+    build: { context: web }
+    image: probeatlas-web:dev
+    environment:
+      PROBEATLAS_API_URL: http://api:8000
+    ports: ["3000:3000"]
+    depends_on:
+      api: { condition: service_healthy }
+    restart: unless-stopped
+    networks: [control]
+
+  agent-a:
+    <<: *agent
+    environment:
+      PROBEATLAS_API_URL: http://api:8000
+      PROBEATLAS_AGENT_ENROLLMENT_TOKEN: ${PROBEATLAS_BOOTSTRAP_ENROLLMENT_TOKEN:-pae_local-dev-only-enrollment-token}
+      PROBEATLAS_AGENT_NAME: local-agent-a
+      PROBEATLAS_AGENT_REGION: dev-local-a
+      PROBEATLAS_AGENT_PROVIDER: docker-compose
+      # Only the demo target network is reachable; db/api addresses stay blocked.
+      PROBEATLAS_AGENT_ALLOWED_PRIVATE_CIDRS: 10.203.10.0/24
+    volumes: [agent-a-state:/var/lib/probeatlas-agent]
+    networks:
+      control: {}
+      targets: { ipv4_address: 10.203.10.11 }
+
+  agent-b:
+    <<: *agent
+    environment:
+      PROBEATLAS_API_URL: http://api:8000
+      PROBEATLAS_AGENT_ENROLLMENT_TOKEN: ${PROBEATLAS_BOOTSTRAP_ENROLLMENT_TOKEN:-pae_local-dev-only-enrollment-token}
+      PROBEATLAS_AGENT_NAME: local-agent-b
+      PROBEATLAS_AGENT_REGION: dev-local-b
+      PROBEATLAS_AGENT_PROVIDER: docker-compose
+      PROBEATLAS_AGENT_ALLOWED_PRIVATE_CIDRS: 10.203.10.0/24
+    volumes: [agent-b-state:/var/lib/probeatlas-agent]
+    networks:
+      control: {}
+      targets: { ipv4_address: 10.203.10.12 }
+
+  demo-target:
+    image: python:3.11-slim
+    command: ["python", "/srv/server.py"]
+    volumes: ["./deploy/demo-target/server.py:/srv/server.py:ro"]
+    ports: ["127.0.0.1:18081:8081"]
+    networks:
+      targets: { ipv4_address: 10.203.10.100 }
+
+networks:
+  control: {}
+  targets:
+    ipam:
+      config: [{ subnet: 10.203.10.0/24 }]
+
+volumes:
+  pgdata: {}
+  agent-a-state: {}
+  agent-b-state: {}

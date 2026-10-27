@@ -1,0 +1,18 @@
+# Measurement agent image. Installs only the agent extra: no web framework,
+# no database driver, no control-plane code paths are importable at runtime.
+FROM python:3.11-slim
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1
+WORKDIR /app
+COPY pyproject.toml README.md ./
+COPY src ./src
+RUN pip install ".[agent]" \
+    && python -c "import probeatlas.agent.main" \
+    && ! python -c "import fastapi" 2>/dev/null \
+    && useradd --system --uid 10001 probeatlas \
+    && mkdir -p /var/lib/probeatlas-agent && chown probeatlas /var/lib/probeatlas-agent
+USER probeatlas
+ENV PROBEATLAS_AGENT_STATE_FILE=/var/lib/probeatlas-agent/state.json
+VOLUME ["/var/lib/probeatlas-agent"]
+# ICMP uses unprivileged ping sockets: run with sysctl net.ipv4.ping_group_range="0 2147483647".
+# No extra capabilities (NET_RAW/NET_ADMIN) are required.
+CMD ["probeatlas-agent"]

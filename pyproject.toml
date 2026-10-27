@@ -1,0 +1,63 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "probeatlas"
+version = "0.1.0"
+description = "ProbeAtlas: developer-first global internet infrastructure monitoring"
+requires-python = ">=3.11"
+readme = "README.md"
+license = { text = "Proprietary" }
+# The shared wire schema and network policy only need pydantic.
+dependencies = ["pydantic>=2.7,<3"]
+
+[project.optional-dependencies]
+# Control plane: API, scheduler, ingestion, alerting.
+server = [
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.30",
+  "sqlalchemy>=2.0.30,<2.2",
+  "psycopg[binary]>=3.2",
+  "alembic>=1.13",
+  "pydantic-settings>=2.3",
+  "email-validator>=2.1",
+  "prometheus-client>=0.20",
+]
+# Measurement agent: deployable on its own, without server dependencies.
+agent = ["httpx>=0.27", "dnspython>=2.6"]
+cli = ["httpx>=0.27"]
+dev = ["pytest>=8", "ruff>=0.6", "httpx>=0.27", "trustme>=1.1"]
+
+[project.scripts]
+probeatlas = "probeatlas.cli.main:main"
+probeatlas-agent = "probeatlas.agent.main:main"
+probeatlas-api = "probeatlas.server.main:run"
+probeatlas-worker = "probeatlas.server.worker:main"
+probeatlas-admin = "probeatlas.server.admin:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/probeatlas"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "S", "N"]
+ignore = [
+  "B008",  # FastAPI Depends() in defaults is idiomatic
+  "S101",  # asserts are fine in tests
+  "S105", "S106",  # false positives on token-ish names
+  "S311",  # random jitter is not cryptographic
+  "S608",  # no string-built SQL; false positives on f-strings
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S", "N802"]
+"src/probeatlas/server/migrations/**" = ["N", "E501"]
