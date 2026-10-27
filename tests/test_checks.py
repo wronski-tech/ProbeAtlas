@@ -5,6 +5,7 @@ from __future__ import annotations
 import socket
 import ssl
 import threading
+import time
 import uuid
 from datetime import UTC, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -25,6 +26,7 @@ ALL = [CheckType.HTTP, CheckType.DNS, CheckType.TCP, CheckType.ICMP]
 
 
 def job(check_type: CheckType, target: str, timeout_ms: int = 3000, **settings) -> JobSpec:
+    """Build a job spec for ``check_type`` against ``target`` with the given settings."""
     now = datetime.now(UTC)
     return JobSpec(job_id=uuid.uuid4(), monitor_id=uuid.uuid4(), check_type=check_type, target=target,
                    timeout_ms=timeout_ms, settings=settings, scheduled_for=now,
@@ -32,6 +34,7 @@ def job(check_type: CheckType, target: str, timeout_ms: int = 3000, **settings) 
 
 
 def ctx(**kw) -> CheckContext:
+    """Build a check context that allows localhost targets and supports every check type by default."""
     return CheckContext(policy=kw.pop("policy", LOCAL), capabilities=kw.pop("capabilities", ALL), **kw)
 
 
@@ -66,6 +69,34 @@ def test_http_timeout(target_server):
     assert r.http_status is None and r.latency_ms is None
 
 
+def test_http_timeout_is_a_hard_deadline_even_when_the_server_drips_bytes():
+    # Each byte arrives well inside the socket timeout, so only a whole-request deadline can stop this.
+    srv = socket.socket()
+    srv.bind(("127.0.0.1", 0))
+    srv.listen(1)
+
+    def drip():
+        """Accept one connection and send a never-ending header one byte every 100 ms."""
+        conn, _ = srv.accept()
+        with conn:
+            conn.recv(4096)
+            try:
+                conn.sendall(b"HTTP/1.1 200 OK\r\nX-Slow: ")
+                for _ in range(80):
+                    conn.sendall(b"a")
+                    time.sleep(0.1)
+            except OSError:
+                pass
+
+    threading.Thread(target=drip, daemon=True).start()
+    start = time.monotonic()
+    r = execute(job(CheckType.HTTP, f"http://127.0.0.1:{srv.getsockname()[1]}/", timeout_ms=1000), ctx())
+    elapsed = time.monotonic() - start
+    srv.close()
+    assert r.failure_category == FailureCategory.TIMEOUT and not r.success
+    assert elapsed < 2.5
+
+
 def test_http_connection_refused():
     port = _free_port()
     r = execute(job(CheckType.HTTP, f"http://127.0.0.1:{port}/"), ctx())
@@ -78,10 +109,14 @@ def test_https_measures_tls_and_verifies_certificate(tmp_path):
     cert = ca.issue_cert("localhost")
 
     class H(BaseHTTPRequestHandler):
+        """Minimal handler that answers ``ok`` over TLS."""
+
         def log_message(self, *a):
+            """Silence the default request logging."""
             pass
 
         def do_GET(self):
+            """Return 200 with a two-byte body."""
             self.send_response(200)
             self.send_header("Content-Length", "2")
             self.end_headers()
@@ -109,6 +144,7 @@ def test_https_measures_tls_and_verifies_certificate(tmp_path):
 
 
 def _free_port() -> int:
+    """Return a localhost TCP port that nothing is listening on."""
     s = socket.socket()
     s.bind(("127.0.0.1", 0))
     port = s.getsockname()[1]
@@ -141,6 +177,7 @@ class FakeDNS:
     """Minimal UDP DNS server returning fixed answers."""
 
     def __init__(self, answers: dict[str, list[str]]):
+        """Start a UDP DNS server on localhost that answers A queries from ``answers``."""
         self.answers = answers
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.bind(("127.0.0.1", 0))
@@ -149,6 +186,7 @@ class FakeDNS:
         self.thread.start()
 
     def _serve(self):
+        """Answer queries until the socket is closed; unknown names get NXDOMAIN."""
         while True:
             try:
                 data, addr = self.sock.recvfrom(4096)
@@ -164,17 +202,20 @@ class FakeDNS:
             self.sock.sendto(resp.to_wire(), addr)
 
     def close(self):
+        """Stop the server."""
         self.sock.close()
 
 
 @pytest.fixture
 def fake_dns(monkeypatch):
+    """Point every new dnspython resolver at a :class:`FakeDNS` instance for this test."""
     server = FakeDNS({"public.test": ["93.184.216.34"], "sneaky.test": ["93.184.216.34", "10.0.0.5"]})
     import dns.resolver
 
     original = dns.resolver.Resolver.__init__
 
     def patched(self, *a, **kw):
+        """Initialize the resolver normally, then use the fake server's port."""
         original(self, *a, **kw)
         self.port = server.port
 
@@ -210,6 +251,7 @@ def test_dns_nameserver_must_pass_policy():
 
 def test_icmp_unsupported_environment_reports_unavailable_not_fake_values(monkeypatch):
     def refuse(_family):
+        """Simulate a host that forbids ping sockets."""
         raise PermissionError("not permitted")
 
     monkeypatch.setattr(icmp_mod, "_open", refuse)
@@ -241,6 +283,7 @@ def test_check_crash_becomes_internal_error(monkeypatch):
     from probeatlas.agent import checks
 
     def boom(_job, _ctx):
+        """A check implementation with a bug."""
         raise RuntimeError("bug")
 
     monkeypatch.setitem(checks.CHECKS, CheckType.HTTP, boom)

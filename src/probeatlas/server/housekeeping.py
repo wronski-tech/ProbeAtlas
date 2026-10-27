@@ -18,6 +18,11 @@ log = logging.getLogger("probeatlas.housekeeping")
 
 
 def mark_stale_agents(db: Session, now: datetime | None = None) -> int:
+    """Mark online agents without a heartbeat in ``agent_offline_after_seconds`` as offline.
+
+    Offline agents receive no new jobs; their leased jobs are recovered by lease expiry. Returns the number
+    of agents marked offline and refreshes the per-status agent gauge.
+    """
     now = now or datetime.now(UTC)
     cutoff = now - timedelta(seconds=get_settings().agent_offline_after_seconds)
     stale = db.execute(
@@ -56,6 +61,11 @@ def mark_no_data_monitors(db: Session, now: datetime | None = None) -> int:
 
 
 def apply_retention(db: Session, now: datetime | None = None) -> dict[str, int]:
+    """Delete data older than the configured retention periods.
+
+    Covers raw results, finished jobs, sent or failed notification deliveries (90 days), expired sessions,
+    and audit events. Incidents and monitors are kept. Returns deleted row counts per table.
+    """
     s = get_settings()
     now = now or datetime.now(UTC)
     out = {

@@ -9,6 +9,7 @@
 | agent | heartbeat visible in `/v1/agents` (`status`, `last_heartbeat_at`) | structured logs |
 
 `/metrics` endpoints are meant for an internal scraper; do not expose them publicly.
+The API serves `/metrics` on its main port, so block that path at the load balancer.
 
 Key metrics:
 
@@ -98,6 +99,11 @@ Applied hourly by the worker:
 
 Incidents and their events are kept until their monitor is deleted.
 
+## Backups
+
+See [backup-restore.md](backup-restore.md): `deploy/backup/pgbackup.sh backup|restore|drill`, the
+recommended PITR + daily dump policy, and the production restore runbook.
+
 ## Database migrations
 
 Migrations are Alembic revisions in `src/probeatlas/server/migrations/versions`.
@@ -125,7 +131,7 @@ PROBEATLAS_ALLOW_PRIVATE_TARGETS=false            # default
 PROBEATLAS_BOOTSTRAP_ENROLLMENT_TOKEN=             # unset; use probeatlas-admin tokens
 PROBEATLAS_WEBHOOK_ALLOWED_PRIVATE_CIDRS=          # unset
 PROBEATLAS_ALLOW_REGISTRATION=false                # until you open sign-ups
-FORWARDED_ALLOW_IPS=<load balancer CIDR>           # so per-IP rate limits see real clients
+FORWARDED_ALLOW_IPS=<load balancer CIDR>           # so per-IP rate limits see real API clients
 ```
 
 ### Production readiness checklist (not yet done)
@@ -136,8 +142,12 @@ FORWARDED_ALLOW_IPS=<load balancer CIDR>           # so per-IP rate limits see r
 - [ ] Hourly rollups for long-range charts, and partitioning `results` by time.
 - [ ] Agent token rotation and mTLS or signed requests between agents and API.
 - [ ] Per-tenant concurrency fairness in `claim_jobs`.
-- [ ] Backups and restore drills; PITR on the managed database.
+- [x] Backup/restore tooling and a verified restore drill (`deploy/backup/pgbackup.sh`, [backup-restore.md](backup-restore.md)).
+- [ ] Enable PITR on the managed database and schedule daily dumps + monthly drills.
+- [x] CI: lint, documentation coverage, tests on PostgreSQL, migration drift, OpenAPI drift, image builds.
 - [ ] Load test (target: 10k checks/minute) and dashboards for the metrics above.
 - [ ] Abuse controls for sign-up (email verification, CAPTCHA) and outbound
       volume per destination.
-- [ ] Security review and penetration test of the SSRF guard and tenant isolation.
+- [x] Internal security review; critical and high findings fixed ([security-review.md](security-review.md)).
+- [ ] Fix the open review findings (M1 forwarded client IP, M2 internal metrics port, H2 DNS resolver, L2, L4, L7).
+- [ ] External penetration test (scope in [security-review.md](security-review.md#3-external-penetration-test-package)).

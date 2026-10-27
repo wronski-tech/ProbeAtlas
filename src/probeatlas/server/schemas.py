@@ -20,10 +20,14 @@ REGION_PATTERN = r"^[a-z0-9][a-z0-9-]{1,40}$"
 
 
 class ORM(BaseModel):
+    """Base for response models that are built directly from ORM rows."""
+
     model_config = ConfigDict(from_attributes=True)
 
 
 class Page(BaseModel, Generic[T]):
+    """A page of results from a list endpoint. Pass ``next_cursor`` back as ``cursor`` to continue."""
+
     items: list[T]
     next_cursor: str | None = Field(
         default=None, description="Opaque cursor; pass as `cursor` to fetch the next page. Null on the last page."
@@ -31,11 +35,13 @@ class Page(BaseModel, Generic[T]):
 
 
 def encode_cursor(*values: Any) -> str:
+    """Encode sort-key values (for example ``created_at`` and ``id``) as an opaque URL-safe cursor."""
     raw = json.dumps([v.isoformat() if isinstance(v, datetime) else str(v) for v in values])
     return base64.urlsafe_b64encode(raw.encode()).decode().rstrip("=")
 
 
 def decode_cursor(cursor: str) -> list[str]:
+    """Decode a cursor from :func:`encode_cursor`; raises 422 ``validation_error`` if it is malformed."""
     from .errors import APIError
 
     try:
@@ -52,6 +58,8 @@ def decode_cursor(cursor: str) -> list[str]:
 
 
 class RegisterRequest(BaseModel):
+    """Create an account and its first workspace. Passwords must be 10-256 characters."""
+
     email: EmailStr
     password: str = Field(min_length=10, max_length=256)
     name: str = Field(min_length=1, max_length=100)
@@ -59,11 +67,15 @@ class RegisterRequest(BaseModel):
 
 
 class LoginRequest(BaseModel):
+    """Email and password login. Returns a session token."""
+
     email: EmailStr
     password: str = Field(max_length=256)
 
 
 class WorkspaceOut(ORM):
+    """A workspace and its limits. ``role`` is the caller's role when listed for a user."""
+
     id: uuid.UUID
     name: str
     role: str | None = None
@@ -73,6 +85,8 @@ class WorkspaceOut(ORM):
 
 
 class UserOut(ORM):
+    """Public profile of a user account."""
+
     id: uuid.UUID
     email: str
     name: str
@@ -80,6 +94,8 @@ class UserOut(ORM):
 
 
 class SessionOut(BaseModel):
+    """A new session token (shown once) with the user and their workspaces."""
+
     token: str
     expires_at: datetime
     user: UserOut
@@ -87,20 +103,28 @@ class SessionOut(BaseModel):
 
 
 class MeOut(BaseModel):
+    """The signed-in user and the workspaces they belong to."""
+
     user: UserOut
     workspaces: list[WorkspaceOut]
 
 
 class WorkspaceCreate(BaseModel):
+    """Create another workspace owned by the caller."""
+
     name: str = Field(min_length=1, max_length=100)
 
 
 class MemberAdd(BaseModel):
+    """Add an existing user, by email, to the workspace with a role."""
+
     email: EmailStr
     role: Literal["owner", "member"] = "member"
 
 
 class MemberOut(BaseModel):
+    """A member of a workspace and their role."""
+
     user_id: uuid.UUID
     email: str
     name: str
@@ -112,11 +136,15 @@ class MemberOut(BaseModel):
 
 
 class ApiKeyCreate(BaseModel):
+    """Create an API key. Keys never expire unless ``expires_in_days`` is set."""
+
     name: str = Field(min_length=1, max_length=100)
     expires_in_days: int | None = Field(default=None, ge=1, le=3650)
 
 
 class ApiKeyOut(ORM):
+    """An API key's metadata. The secret is never returned after creation."""
+
     id: uuid.UUID
     name: str
     prefix: str
@@ -127,6 +155,8 @@ class ApiKeyOut(ORM):
 
 
 class ApiKeyIssued(ApiKeyOut):
+    """A newly created or rotated API key, including the secret ``key`` (shown only once)."""
+
     key: str = Field(description="The secret. Shown only once; store it securely.")
 
 
@@ -134,6 +164,8 @@ class ApiKeyIssued(ApiKeyOut):
 
 
 class HttpSettings(BaseModel):
+    """Settings for ``http`` monitors. Status patterns accept ``200``, ``200-299``, or ``2xx``."""
+
     model_config = ConfigDict(extra="forbid")
     method: Literal["GET", "HEAD"] = "GET"
     expected_status_codes: list[str] = Field(default_factory=lambda: ["2xx"], min_length=1, max_length=20)
@@ -143,6 +175,7 @@ class HttpSettings(BaseModel):
     @field_validator("expected_status_codes")
     @classmethod
     def _patterns(cls, v: list[str]) -> list[str]:
+        """Reject expected status patterns that are not ``NNN``, ``NNN-NNN``, or ``Nxx``."""
         for p in v:
             if not re.match(STATUS_PATTERN, p):
                 raise ValueError(f"invalid status pattern {p!r}; use 200, 200-299 or 2xx")
@@ -150,17 +183,23 @@ class HttpSettings(BaseModel):
 
 
 class DnsSettings(BaseModel):
+    """Settings for ``dns`` monitors: record type and an optional public nameserver IP."""
+
     model_config = ConfigDict(extra="forbid")
     record_type: Literal["A", "AAAA", "CNAME", "MX", "TXT", "NS"] = "A"
     nameserver: IPvAnyAddress | None = None
 
 
 class TcpSettings(BaseModel):
+    """Settings for ``tcp`` monitors: the port to connect to."""
+
     model_config = ConfigDict(extra="forbid")
     port: int = Field(ge=1, le=65535)
 
 
 class IcmpSettings(BaseModel):
+    """Settings for ``icmp`` monitors: number of echo requests per check (1-10)."""
+
     model_config = ConfigDict(extra="forbid")
     packet_count: int = Field(default=3, ge=1, le=10)
 
@@ -174,6 +213,7 @@ SETTINGS_MODELS: dict[CheckType, type[BaseModel]] = {
 
 
 def _normalize_regions(v: list[str]) -> list[str]:
+    """Lowercase, deduplicate (keeping order), and validate region labels."""
     out = list(dict.fromkeys(r.strip().lower() for r in v))
     for r in out:
         if not re.match(REGION_PATTERN, r):
@@ -182,6 +222,8 @@ def _normalize_regions(v: list[str]) -> list[str]:
 
 
 class MonitorBase(BaseModel):
+    """Fields shared by monitor creation and responses."""
+
     name: str = Field(min_length=1, max_length=100)
     interval_seconds: int = Field(default=60, ge=10, le=86_400)
     timeout_ms: int = Field(default=10_000, ge=500, le=60_000)
@@ -193,10 +235,17 @@ class MonitorBase(BaseModel):
     @field_validator("regions")
     @classmethod
     def _regions(cls, v: list[str]) -> list[str]:
+        """Normalize the ``regions`` list."""
         return _normalize_regions(v)
 
 
 class MonitorCreate(MonitorBase):
+    """Create a monitor.
+
+    ``settings`` depends on ``type``: see ``HttpSettings``, ``DnsSettings``, ``TcpSettings``, and
+    ``IcmpSettings``. Targets that resolve to private or internal addresses are rejected.
+    """
+
     type: CheckType
     target: str = Field(min_length=1, max_length=2048, description="URL for http, hostname or IP otherwise.")
     settings: dict[str, Any] = Field(default_factory=dict)
@@ -233,10 +282,17 @@ class MonitorUpdate(BaseModel):
     @field_validator("regions")
     @classmethod
     def _regions(cls, v: list[str] | None) -> list[str] | None:
+        """Normalize ``regions`` when it is provided."""
         return None if v is None else _normalize_regions(v)
 
 
 class MonitorOut(BaseModel):
+    """A monitor and its current state.
+
+    ``state`` is ``unknown`` (no recent data), ``up``, ``degraded`` (some regions failing or slow), ``down``
+    (all regions failing), or ``paused``.
+    """
+
     id: uuid.UUID
     name: str
     type: str
@@ -256,6 +312,7 @@ class MonitorOut(BaseModel):
 
     @classmethod
     def of(cls, m: Any) -> MonitorOut:
+        """Build the response from a ``Monitor`` row, reporting paused monitors as ``paused``."""
         return cls(
             id=m.id,
             name=m.name,
@@ -280,6 +337,13 @@ class MonitorOut(BaseModel):
 
 
 class MeasurementOut(ORM):
+    """One raw measurement result (schema version 1).
+
+    Durations are milliseconds; fields that do not apply to the check type or were not measured are null.
+    ``measured_at`` comes from the agent and ``ingested_at`` from the control plane; ``late`` marks results
+    that arrived after the job lease.
+    """
+
     id: uuid.UUID
     schema_version: int
     job_id: uuid.UUID
@@ -312,6 +376,8 @@ class MeasurementOut(ORM):
 
 
 class LatencyStats(BaseModel):
+    """Latency statistics over successful samples. Percentiles are null when there are too few samples."""
+
     sample_count: int = Field(description="Successful samples with a latency value.")
     min_ms: float | None
     p50_ms: float | None = Field(description=">= 5 samples required, otherwise null.")
@@ -321,6 +387,8 @@ class LatencyStats(BaseModel):
 
 
 class GroupPerformance(BaseModel):
+    """Availability and latency for one group of results: overall, one region, or one agent."""
+
     key: str
     region: str
     agent_id: uuid.UUID | None = None
@@ -336,6 +404,8 @@ class GroupPerformance(BaseModel):
 
 
 class RegionalPerformance(BaseModel):
+    """Comparison of a monitor's performance across regions and agents for a time window."""
+
     monitor_id: uuid.UUID
     since: datetime
     until: datetime
@@ -351,6 +421,8 @@ class RegionalPerformance(BaseModel):
 
 
 class TimeseriesPoint(BaseModel):
+    """Aggregates for one time bucket. ``t`` is the bucket start (UTC)."""
+
     t: datetime
     total: int
     successes: int
@@ -361,11 +433,15 @@ class TimeseriesPoint(BaseModel):
 
 
 class TimeseriesSeries(BaseModel):
+    """Points for one group (a region, an agent id, or ``all``)."""
+
     key: str
     points: list[TimeseriesPoint]
 
 
 class Timeseries(BaseModel):
+    """Bucketed history for a monitor. Buckets without results are omitted, not zero-filled."""
+
     monitor_id: uuid.UUID
     since: datetime
     until: datetime
@@ -377,6 +453,11 @@ class Timeseries(BaseModel):
 
 
 class AlertRuleBase(BaseModel):
+    """Fields shared by alert rule creation and responses.
+
+    ``latency`` and ``packet_loss`` rules require ``threshold`` (milliseconds or percent).
+    """
+
     kind: Literal["unavailable", "http_status", "latency", "packet_loss"]
     threshold: float | None = Field(default=None, gt=0, description="ms for latency, percent for packet_loss.")
     consecutive_breaches: int = Field(default=3, ge=1, le=20)
@@ -386,6 +467,7 @@ class AlertRuleBase(BaseModel):
 
     @model_validator(mode="after")
     def _threshold(self):
+        """Require a threshold for latency and packet-loss rules and cap packet loss at 100%."""
         if self.kind in ("latency", "packet_loss") and self.threshold is None:
             raise ValueError(f"threshold is required for {self.kind} rules")
         if self.kind == "packet_loss" and self.threshold is not None and self.threshold > 100:
@@ -394,10 +476,14 @@ class AlertRuleBase(BaseModel):
 
 
 class AlertRuleCreate(AlertRuleBase):
+    """Create an alert rule for a monitor in the caller's workspace."""
+
     monitor_id: uuid.UUID
 
 
 class AlertRuleUpdate(BaseModel):
+    """Partial update of an alert rule. ``kind`` and ``monitor_id`` are immutable."""
+
     model_config = ConfigDict(extra="forbid")
     threshold: float | None = Field(default=None, gt=0)
     consecutive_breaches: int | None = Field(default=None, ge=1, le=20)
@@ -407,6 +493,8 @@ class AlertRuleUpdate(BaseModel):
 
 
 class AlertRuleOut(ORM):
+    """An alert rule and the regions in which it is currently firing."""
+
     id: uuid.UUID
     monitor_id: uuid.UUID
     kind: str
@@ -421,6 +509,8 @@ class AlertRuleOut(ORM):
 
 
 class IncidentOut(ORM):
+    """An incident: a period during which an alert rule was firing."""
+
     id: uuid.UUID
     monitor_id: uuid.UUID
     rule_id: uuid.UUID
@@ -434,6 +524,8 @@ class IncidentOut(ORM):
 
 
 class IncidentEventOut(ORM):
+    """A timeline entry of an incident."""
+
     id: uuid.UUID
     incident_id: uuid.UUID
     kind: str
@@ -443,16 +535,22 @@ class IncidentEventOut(ORM):
 
 
 class IncidentDetail(IncidentOut):
+    """An incident with its full timeline."""
+
     events: list[IncidentEventOut]
 
 
 class ChannelCreate(BaseModel):
+    """Create a webhook notification channel. The URL must be a public http(s) URL."""
+
     name: str = Field(min_length=1, max_length=100)
     url: str = Field(min_length=1, max_length=2048)
     enabled: bool = True
 
 
 class ChannelUpdate(BaseModel):
+    """Partial update of a notification channel."""
+
     model_config = ConfigDict(extra="forbid")
     name: str | None = Field(default=None, min_length=1, max_length=100)
     url: str | None = Field(default=None, min_length=1, max_length=2048)
@@ -460,6 +558,8 @@ class ChannelUpdate(BaseModel):
 
 
 class ChannelOut(ORM):
+    """A notification channel. The signing secret is never returned after creation."""
+
     id: uuid.UUID
     kind: str
     name: str
@@ -469,10 +569,14 @@ class ChannelOut(ORM):
 
 
 class ChannelIssued(ChannelOut):
+    """A newly created channel, including its HMAC ``signing_secret`` (shown only once)."""
+
     signing_secret: str = Field(description="HMAC-SHA256 secret for X-ProbeAtlas-Signature. Shown only once.")
 
 
 class DeliveryOut(ORM):
+    """One notification delivery and its status (``pending``, ``sent``, or ``failed``)."""
+
     id: uuid.UUID
     channel_id: uuid.UUID
     incident_id: uuid.UUID | None
@@ -486,6 +590,8 @@ class DeliveryOut(ORM):
 
 
 class ChannelTestResult(BaseModel):
+    """Outcome of sending a test event to a channel."""
+
     delivered: bool
     status_code: int | None
     error: str | None
@@ -495,6 +601,8 @@ class ChannelTestResult(BaseModel):
 
 
 class AgentOut(ORM):
+    """A monitoring agent. Location fields are labels configured by the operator, not verified."""
+
     id: uuid.UUID
     name: str
     region: str
@@ -509,6 +617,8 @@ class AgentOut(ORM):
 
 
 class LocationOut(BaseModel):
+    """A selectable monitoring region with the agents currently serving it."""
+
     region: str
     country_codes: list[str]
     cities: list[str]
@@ -518,6 +628,8 @@ class LocationOut(BaseModel):
 
 
 class AuditEventOut(ORM):
+    """A security-relevant action recorded in the workspace audit log."""
+
     id: uuid.UUID
     actor_type: str
     actor_id: str | None
@@ -530,6 +642,8 @@ class AuditEventOut(ORM):
 
 
 class MonitorEvent(BaseModel):
+    """An entry in a monitor's recent-events feed, from incidents or the audit log."""
+
     at: datetime
     source: Literal["incident", "audit"]
     kind: str
@@ -537,6 +651,11 @@ class MonitorEvent(BaseModel):
 
 
 class Overview(BaseModel):
+    """Dashboard summary for the workspace over ``window_hours``.
+
+    ``availability_pct`` is null when there are no results in the window.
+    """
+
     window_hours: int
     monitors: dict[str, int]
     failing_monitors: list[MonitorOut]

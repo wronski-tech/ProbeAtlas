@@ -28,20 +28,33 @@ MAX_BUFFERED_RESULTS = 2000
 
 
 class Backoff:
+    """Exponential backoff with jitter for reconnecting to the control plane."""
+
     def __init__(self, base: float = 1.0, cap: float = 30.0):
+        """Start at ``base`` seconds and never wait longer than ``cap`` seconds."""
         self.base, self.cap, self.attempt = base, cap, 0
 
     def next_delay(self) -> float:
+        """Return the next delay in seconds (50-100% of the exponential value) and advance."""
         delay = min(self.cap, self.base * 2**self.attempt)
         self.attempt += 1
         return delay * (0.5 + random.random() / 2)
 
     def reset(self) -> None:
+        """Return to the base delay after a successful request."""
         self.attempt = 0
 
 
 class Agent:
+    """The measurement agent: enrollment, heartbeats, job claiming, execution, and result delivery.
+
+    Checks run in a bounded thread pool. Finished results are buffered in ``outbox`` (bounded by
+    ``MAX_BUFFERED_RESULTS``) so a temporary control-plane outage does not lose measurements; the control
+    plane deduplicates by ``job_id`` and ``result_id``, so resubmitting is safe.
+    """
+
     def __init__(self, config: AgentConfig, client: ControlPlaneClient | None = None):
+        """Build the agent from ``config``; ``client`` can be injected for tests."""
         self.config = config
         self.client = client or ControlPlaneClient(config.api_url)
         self.stop_event = threading.Event()
@@ -64,12 +77,14 @@ class Agent:
     # -- credentials -----------------------------------------------------
 
     def _load_state(self) -> dict | None:
+        """Read saved credentials from the state file, or return ``None`` if not enrolled yet."""
         path = Path(self.config.state_file)
         if path.exists():
             return json.loads(path.read_text())
         return None
 
     def _save_state(self, agent_id: str, token: str) -> None:
+        """Atomically write the agent credentials to the state file with mode 0600."""
         path = Path(self.config.state_file)
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_suffix(".tmp")
@@ -79,6 +94,11 @@ class Agent:
         tmp.replace(path)
 
     def ensure_registered(self) -> None:
+        """Load saved credentials or enroll with the enrollment token.
+
+        Credentials are reused only if they were issued by the same ``api_url``. Registration retries with
+        backoff on transient failures until it succeeds or the agent is stopped.
+        """
         state = self._load_state()
         if state and state.get("api_url") == self.config.api_url:
             self.client.set_credentials(state["agent_id"], state["agent_token"])
@@ -108,6 +128,7 @@ class Agent:
         log.info("agent enrolled", extra=log_fields(agent_id=agent_id, region=self.config.region))
 
     def _reenroll(self) -> None:
+        """Discard rejected credentials and enroll again (for example after the agent was revoked)."""
         log.warning("agent credentials rejected; re-enrolling", extra=log_fields(agent_id=self.client.agent_id))
         Path(self.config.state_file).unlink(missing_ok=True)
         self.ensure_registered()
@@ -115,11 +136,13 @@ class Agent:
     # -- loops -----------------------------------------------------------
 
     def _sleep_backoff(self, what: str, exc: Exception) -> None:
+        """Log ``what`` failed and wait for the next backoff delay (interrupted by stop)."""
         delay = self._backoff.next_delay()
         log.warning(f"{what}; retrying", extra=log_fields(error=str(exc), retry_in_s=round(delay, 2)))
         self.stop_event.wait(delay)
 
     def heartbeat_loop(self) -> None:
+        """Send heartbeats every ``heartbeat_interval_s`` until stopped. Failures are logged, not raised."""
         while not self.stop_event.is_set():
             try:
                 self.client.heartbeat(
@@ -135,6 +158,7 @@ class Agent:
             self.stop_event.wait(self.config.heartbeat_interval_s)
 
     def _collect(self) -> None:
+        """Move finished checks from ``inflight`` to the outbox and log their outcome."""
         for job_id, fut in list(self.inflight.items()):
             if fut.done():
                 del self.inflight[job_id]
@@ -181,6 +205,7 @@ class Agent:
         return len(jobs)
 
     def run(self) -> None:
+        """Enroll, start the heartbeat thread, and run the claim/execute/submit loop until stopped."""
         self.ensure_registered()
         if self.stop_event.is_set():
             return

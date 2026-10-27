@@ -12,6 +12,7 @@
           "auth & workspaces"
         ],
         "summary": "Register",
+        "description": "Create an account and a first workspace, and return a session.\n\nRate limited per client IP. Returns 403 when registration is disabled and 409 if the email is taken.",
         "operationId": "register_v1_auth_register_post",
         "requestBody": {
           "content": {
@@ -53,6 +54,7 @@
           "auth & workspaces"
         ],
         "summary": "Login",
+        "description": "Exchange email and password for a session token.\n\nRate limited per client IP. Unknown emails and wrong passwords get the same 401 response and the same\nhashing cost, so the endpoint does not reveal which accounts exist.",
         "operationId": "login_v1_auth_login_post",
         "requestBody": {
           "content": {
@@ -94,6 +96,7 @@
           "auth & workspaces"
         ],
         "summary": "Logout",
+        "description": "Revoke the current session token.",
         "operationId": "logout_v1_auth_logout_post",
         "parameters": [
           {
@@ -136,6 +139,7 @@
           "auth & workspaces"
         ],
         "summary": "Me",
+        "description": "Return the signed-in user and their workspaces (session tokens only).",
         "operationId": "me_v1_auth_me_get",
         "parameters": [
           {
@@ -185,6 +189,7 @@
           "auth & workspaces"
         ],
         "summary": "List Workspaces",
+        "description": "List the workspaces the signed-in user belongs to (session tokens only).",
         "operationId": "list_workspaces_v1_workspaces_get",
         "parameters": [
           {
@@ -236,6 +241,7 @@
           "auth & workspaces"
         ],
         "summary": "Create Workspace",
+        "description": "Create a workspace owned by the signed-in user (at most 10 owned workspaces).",
         "operationId": "create_workspace_v1_workspaces_post",
         "parameters": [
           {
@@ -295,6 +301,7 @@
           "auth & workspaces"
         ],
         "summary": "List Members",
+        "description": "List the members of the current workspace and their roles.",
         "operationId": "list_members_v1_members_get",
         "parameters": [
           {
@@ -363,6 +370,7 @@
           "auth & workspaces"
         ],
         "summary": "Add Member",
+        "description": "Add a registered user to the workspace by email (owner only).",
         "operationId": "add_member_v1_members_post",
         "parameters": [
           {
@@ -439,6 +447,7 @@
           "auth & workspaces"
         ],
         "summary": "Remove Member",
+        "description": "Remove a member from the workspace (owner only). The last owner cannot be removed.",
         "operationId": "remove_member_v1_members__user_id__delete",
         "parameters": [
           {
@@ -508,6 +517,7 @@
           "api keys"
         ],
         "summary": "List Keys",
+        "description": "List the workspace's API keys, newest first. Secrets are never returned.",
         "operationId": "list_keys_v1_api_keys_get",
         "parameters": [
           {
@@ -576,6 +586,7 @@
           "api keys"
         ],
         "summary": "Create Key",
+        "description": "Create an API key (owner session only). The secret is returned once in ``key``.",
         "operationId": "create_key_v1_api_keys_post",
         "parameters": [
           {
@@ -652,6 +663,7 @@
           "api keys"
         ],
         "summary": "Revoke Key",
+        "description": "Revoke an API key immediately. Revoking an already revoked key is a no-op.",
         "operationId": "revoke_key_v1_api_keys__key_id__delete",
         "parameters": [
           {
@@ -798,6 +810,7 @@
           "monitors"
         ],
         "summary": "List Monitors",
+        "description": "List monitors, newest first, optionally filtered by state and type. Cursor-paginated.",
         "operationId": "list_monitors_v1_monitors_get",
         "parameters": [
           {
@@ -923,6 +936,7 @@
           "monitors"
         ],
         "summary": "Create Monitor",
+        "description": "Create a monitor. Checks are scheduled immediately unless ``paused`` is true.\n\nValidates type-specific settings, workspace limits, region availability, and the target against the\noutbound network policy.",
         "operationId": "create_monitor_v1_monitors_post",
         "parameters": [
           {
@@ -999,6 +1013,7 @@
           "monitors"
         ],
         "summary": "Get Monitor",
+        "description": "Get one monitor and its current state.",
         "operationId": "get_monitor_v1_monitors__monitor_id__get",
         "parameters": [
           {
@@ -1073,6 +1088,7 @@
           "monitors"
         ],
         "summary": "Update Monitor",
+        "description": "Partially update a monitor. Every change increments ``config_version``.\n\nJobs that are already scheduled keep the configuration they were created with.",
         "operationId": "update_monitor_v1_monitors__monitor_id__patch",
         "parameters": [
           {
@@ -1227,6 +1243,7 @@
           "monitors"
         ],
         "summary": "Pause Monitor",
+        "description": "Pause a monitor: stop scheduling checks and cancel pending jobs.",
         "operationId": "pause_monitor_v1_monitors__monitor_id__pause_post",
         "parameters": [
           {
@@ -1303,6 +1320,7 @@
           "monitors"
         ],
         "summary": "Resume Monitor",
+        "description": "Resume a paused monitor and schedule a check immediately.",
         "operationId": "resume_monitor_v1_monitors__monitor_id__resume_post",
         "parameters": [
           {
@@ -1523,6 +1541,7 @@
           "monitors"
         ],
         "summary": "Monitor Timeseries",
+        "description": "Bucketed availability and latency history for a monitor (default: last 24h).\n\nGroup by ``region``, ``agent``, or ``none``. The bucket size is chosen automatically unless\n``bucket_seconds`` is given.",
         "operationId": "monitor_timeseries_v1_monitors__monitor_id__timeseries_get",
         "parameters": [
           {
@@ -2008,6 +2027,7 @@
           "alerting"
         ],
         "summary": "List Rules",
+        "description": "List the workspace's alert rules, optionally for one monitor.",
         "operationId": "list_rules_v1_alert_rules_get",
         "parameters": [
           {
@@ -2093,6 +2113,7 @@
           "alerting"
         ],
         "summary": "Create Rule",
+        "description": "Create an alert rule for a monitor.\n\n``http_status`` rules apply only to HTTP monitors and ``packet_loss`` rules only to ICMP monitors. A\nmonitor can have at most 20 rules.",
         "operationId": "create_rule_v1_alert_rules_post",
         "parameters": [
           {
@@ -2169,6 +2190,7 @@
           "alerting"
         ],
         "summary": "Get Rule",
+        "description": "Get one alert rule and the regions where it is firing.",
         "operationId": "get_rule_v1_alert_rules__rule_id__get",
         "parameters": [
           {
@@ -2243,6 +2265,7 @@
           "alerting"
         ],
         "summary": "Update Rule",
+        "description": "Update an alert rule's threshold, hysteresis, minimum regions, or enabled flag.",
         "operationId": "update_rule_v1_alert_rules__rule_id__patch",
         "parameters": [
           {
@@ -2327,6 +2350,7 @@
           "alerting"
         ],
         "summary": "Delete Rule",
+        "description": "Delete an alert rule together with its incidents and streak state.",
         "operationId": "delete_rule_v1_alert_rules__rule_id__delete",
         "parameters": [
           {
@@ -2396,6 +2420,7 @@
           "alerting"
         ],
         "summary": "List Incidents",
+        "description": "List incidents, newest first, optionally filtered by status and monitor. Cursor-paginated.",
         "operationId": "list_incidents_v1_incidents_get",
         "parameters": [
           {
@@ -2524,6 +2549,7 @@
           "alerting"
         ],
         "summary": "Get Incident",
+        "description": "Get an incident with its full event timeline.",
         "operationId": "get_incident_v1_incidents__incident_id__get",
         "parameters": [
           {
@@ -2600,6 +2626,7 @@
           "alerting"
         ],
         "summary": "List Channels",
+        "description": "List the workspace's notification channels. Signing secrets are not included.",
         "operationId": "list_channels_v1_notification_channels_get",
         "parameters": [
           {
@@ -2668,6 +2695,7 @@
           "alerting"
         ],
         "summary": "Create Channel",
+        "description": "Create a webhook channel (owner only). The response includes the signing secret once.\n\nThe URL must be http(s) and resolve to a public address. At most 10 channels per workspace.",
         "operationId": "create_channel_v1_notification_channels_post",
         "parameters": [
           {
@@ -2744,6 +2772,7 @@
           "alerting"
         ],
         "summary": "Update Channel",
+        "description": "Update a channel's name, URL, or enabled flag (owner only).",
         "operationId": "update_channel_v1_notification_channels__channel_id__patch",
         "parameters": [
           {
@@ -2828,6 +2857,7 @@
           "alerting"
         ],
         "summary": "Delete Channel",
+        "description": "Delete a notification channel and its pending deliveries (owner only).",
         "operationId": "delete_channel_v1_notification_channels__channel_id__delete",
         "parameters": [
           {
@@ -2974,6 +3004,7 @@
           "alerting"
         ],
         "summary": "List Deliveries",
+        "description": "List recent notification deliveries with their status and last error.",
         "operationId": "list_deliveries_v1_notification_deliveries_get",
         "parameters": [
           {
@@ -3277,6 +3308,7 @@
           "overview"
         ],
         "summary": "Audit Events",
+        "description": "List the workspace audit log, newest first (owner only).",
         "operationId": "audit_events_v1_audit_events_get",
         "parameters": [
           {
@@ -3417,6 +3449,7 @@
           "agent protocol"
         ],
         "summary": "Heartbeat",
+        "description": "Record an agent heartbeat and refresh its version, capabilities, and status.\n\nAn agent marked offline becomes ``online`` again on its next heartbeat. Disabled agents are rejected.",
         "operationId": "heartbeat_agent_v1_heartbeat_post",
         "parameters": [
           {
@@ -3474,6 +3507,7 @@
           "agent protocol"
         ],
         "summary": "Claim",
+        "description": "Lease up to ``max_jobs`` due jobs in the agent's region that it is able to run.\n\nEach job must be reported before its ``lease_expires_at``; otherwise it may be retried by another agent.",
         "operationId": "claim_agent_v1_jobs_claim_post",
         "parameters": [
           {
@@ -3533,6 +3567,7 @@
           "agent protocol"
         ],
         "summary": "Submit Results",
+        "description": "Submit measurement results for leased jobs.\n\nEach result is acknowledged as ``accepted``, ``duplicate`` (already stored; safe to drop), or\n``rejected`` with a reason. Tenant and target are taken from the job, never from the payload.",
         "operationId": "submit_results_agent_v1_results_post",
         "parameters": [
           {
@@ -3592,6 +3627,7 @@
           "ops"
         ],
         "summary": "Healthz",
+        "description": "Liveness probe: the process is up. Does not touch the database.",
         "operationId": "healthz_healthz_get",
         "responses": {
           "200": {
@@ -3611,6 +3647,7 @@
           "ops"
         ],
         "summary": "Readyz",
+        "description": "Readiness probe: the database answers ``SELECT 1``.",
         "operationId": "readyz_readyz_get",
         "responses": {
           "200": {
@@ -3659,7 +3696,8 @@
           "version",
           "capabilities"
         ],
-        "title": "AgentHeartbeat"
+        "title": "AgentHeartbeat",
+        "description": "Periodic liveness report sent to ``POST /agent/v1/heartbeat``."
       },
       "AgentOut": {
         "properties": {
@@ -3756,7 +3794,8 @@
           "last_heartbeat_at",
           "registered_at"
         ],
-        "title": "AgentOut"
+        "title": "AgentOut",
+        "description": "A monitoring agent. Location fields are labels configured by the operator, not verified."
       },
       "AgentRegistration": {
         "properties": {
@@ -3827,7 +3866,8 @@
           "version",
           "capabilities"
         ],
-        "title": "AgentRegistration"
+        "title": "AgentRegistration",
+        "description": "Payload an agent sends once to ``POST /agent/v1/register`` with its enrollment token.\n\nLocation fields (``region``, ``country_code``, ``city``, ``provider``) are operator-configured labels;\nthe control plane does not verify or infer them."
       },
       "AlertRuleCreate": {
         "properties": {
@@ -3891,7 +3931,8 @@
           "kind",
           "monitor_id"
         ],
-        "title": "AlertRuleCreate"
+        "title": "AlertRuleCreate",
+        "description": "Create an alert rule for a monitor in the caller's workspace."
       },
       "AlertRuleOut": {
         "properties": {
@@ -3968,7 +4009,8 @@
           "created_at",
           "updated_at"
         ],
-        "title": "AlertRuleOut"
+        "title": "AlertRuleOut",
+        "description": "An alert rule and the regions in which it is currently firing."
       },
       "AlertRuleUpdate": {
         "properties": {
@@ -4037,7 +4079,8 @@
         },
         "additionalProperties": false,
         "type": "object",
-        "title": "AlertRuleUpdate"
+        "title": "AlertRuleUpdate",
+        "description": "Partial update of an alert rule. ``kind`` and ``monitor_id`` are immutable."
       },
       "ApiKeyCreate": {
         "properties": {
@@ -4065,7 +4108,8 @@
         "required": [
           "name"
         ],
-        "title": "ApiKeyCreate"
+        "title": "ApiKeyCreate",
+        "description": "Create an API key. Keys never expire unless ``expires_in_days`` is set."
       },
       "ApiKeyIssued": {
         "properties": {
@@ -4140,7 +4184,8 @@
           "revoked_at",
           "key"
         ],
-        "title": "ApiKeyIssued"
+        "title": "ApiKeyIssued",
+        "description": "A newly created or rotated API key, including the secret ``key`` (shown only once)."
       },
       "ApiKeyOut": {
         "properties": {
@@ -4209,7 +4254,8 @@
           "expires_at",
           "revoked_at"
         ],
-        "title": "ApiKeyOut"
+        "title": "ApiKeyOut",
+        "description": "An API key's metadata. The secret is never returned after creation."
       },
       "AuditEventOut": {
         "properties": {
@@ -4293,7 +4339,8 @@
           "details",
           "created_at"
         ],
-        "title": "AuditEventOut"
+        "title": "AuditEventOut",
+        "description": "A security-relevant action recorded in the workspace audit log."
       },
       "ChannelCreate": {
         "properties": {
@@ -4320,7 +4367,8 @@
           "name",
           "url"
         ],
-        "title": "ChannelCreate"
+        "title": "ChannelCreate",
+        "description": "Create a webhook notification channel. The URL must be a public http(s) URL."
       },
       "ChannelIssued": {
         "properties": {
@@ -4366,7 +4414,8 @@
           "created_at",
           "signing_secret"
         ],
-        "title": "ChannelIssued"
+        "title": "ChannelIssued",
+        "description": "A newly created channel, including its HMAC ``signing_secret`` (shown only once)."
       },
       "ChannelOut": {
         "properties": {
@@ -4406,7 +4455,8 @@
           "enabled",
           "created_at"
         ],
-        "title": "ChannelOut"
+        "title": "ChannelOut",
+        "description": "A notification channel. The signing secret is never returned after creation."
       },
       "ChannelTestResult": {
         "properties": {
@@ -4443,7 +4493,8 @@
           "status_code",
           "error"
         ],
-        "title": "ChannelTestResult"
+        "title": "ChannelTestResult",
+        "description": "Outcome of sending a test event to a channel."
       },
       "ChannelUpdate": {
         "properties": {
@@ -4487,7 +4538,8 @@
         },
         "additionalProperties": false,
         "type": "object",
-        "title": "ChannelUpdate"
+        "title": "ChannelUpdate",
+        "description": "Partial update of a notification channel."
       },
       "CheckType": {
         "type": "string",
@@ -4497,7 +4549,8 @@
           "tcp",
           "icmp"
         ],
-        "title": "CheckType"
+        "title": "CheckType",
+        "description": "Measurement protocols an agent can execute. Values are stable wire identifiers."
       },
       "ClaimRequest": {
         "properties": {
@@ -4510,7 +4563,8 @@
           }
         },
         "type": "object",
-        "title": "ClaimRequest"
+        "title": "ClaimRequest",
+        "description": "Body of ``POST /agent/v1/jobs/claim``: how many jobs the agent can run right now."
       },
       "ClaimResponse": {
         "properties": {
@@ -4526,7 +4580,8 @@
         "required": [
           "jobs"
         ],
-        "title": "ClaimResponse"
+        "title": "ClaimResponse",
+        "description": "Jobs leased to the agent. Each must be executed and reported before its lease expires."
       },
       "DeliveryOut": {
         "properties": {
@@ -4617,7 +4672,8 @@
           "created_at",
           "sent_at"
         ],
-        "title": "DeliveryOut"
+        "title": "DeliveryOut",
+        "description": "One notification delivery and its status (``pending``, ``sent``, or ``failed``)."
       },
       "FailureCategory": {
         "type": "string",
@@ -4639,7 +4695,8 @@
           "unsupported",
           "internal_error"
         ],
-        "title": "FailureCategory"
+        "title": "FailureCategory",
+        "description": "Stable, machine-readable reason a measurement failed.\n\nCategories are part of the public API (dashboards, alert rules, and the ``failure_category`` filter rely\non them). Add new values; never rename existing ones."
       },
       "GroupPerformance": {
         "properties": {
@@ -4742,7 +4799,8 @@
           "last_measured_at",
           "insufficient_data"
         ],
-        "title": "GroupPerformance"
+        "title": "GroupPerformance",
+        "description": "Availability and latency for one group of results: overall, one region, or one agent."
       },
       "HTTPValidationError": {
         "properties": {
@@ -4836,7 +4894,8 @@
           "resolved_at",
           "events"
         ],
-        "title": "IncidentDetail"
+        "title": "IncidentDetail",
+        "description": "An incident with its full timeline."
       },
       "IncidentEventOut": {
         "properties": {
@@ -4878,7 +4937,8 @@
           "details",
           "created_at"
         ],
-        "title": "IncidentEventOut"
+        "title": "IncidentEventOut",
+        "description": "A timeline entry of an incident."
       },
       "IncidentOut": {
         "properties": {
@@ -4951,7 +5011,8 @@
           "opened_at",
           "resolved_at"
         ],
-        "title": "IncidentOut"
+        "title": "IncidentOut",
+        "description": "An incident: a period during which an alert rule was firing."
       },
       "JobSpec": {
         "properties": {
@@ -5082,7 +5143,8 @@
           "p99_ms",
           "avg_ms"
         ],
-        "title": "LatencyStats"
+        "title": "LatencyStats",
+        "description": "Latency statistics over successful samples. Percentiles are null when there are too few samples."
       },
       "LocationOut": {
         "properties": {
@@ -5129,7 +5191,8 @@
           "agents_online",
           "capabilities"
         ],
-        "title": "LocationOut"
+        "title": "LocationOut",
+        "description": "A selectable monitoring region with the agents currently serving it."
       },
       "LoginRequest": {
         "properties": {
@@ -5149,7 +5212,8 @@
           "email",
           "password"
         ],
-        "title": "LoginRequest"
+        "title": "LoginRequest",
+        "description": "Email and password login. Returns a session token."
       },
       "MeOut": {
         "properties": {
@@ -5169,7 +5233,8 @@
           "user",
           "workspaces"
         ],
-        "title": "MeOut"
+        "title": "MeOut",
+        "description": "The signed-in user and the workspaces they belong to."
       },
       "MeasurementOut": {
         "properties": {
@@ -5448,7 +5513,8 @@
           "remote_address",
           "details"
         ],
-        "title": "MeasurementOut"
+        "title": "MeasurementOut",
+        "description": "One raw measurement result (schema version 1).\n\nDurations are milliseconds; fields that do not apply to the check type or were not measured are null.\n``measured_at`` comes from the agent and ``ingested_at`` from the control plane; ``late`` marks results\nthat arrived after the job lease."
       },
       "MeasurementResult": {
         "properties": {
@@ -5728,7 +5794,8 @@
         "required": [
           "email"
         ],
-        "title": "MemberAdd"
+        "title": "MemberAdd",
+        "description": "Add an existing user, by email, to the workspace with a role."
       },
       "MemberOut": {
         "properties": {
@@ -5763,7 +5830,8 @@
           "role",
           "created_at"
         ],
-        "title": "MemberOut"
+        "title": "MemberOut",
+        "description": "A member of a workspace and their role."
       },
       "MonitorCreate": {
         "properties": {
@@ -5838,7 +5906,8 @@
           "type",
           "target"
         ],
-        "title": "MonitorCreate"
+        "title": "MonitorCreate",
+        "description": "Create a monitor.\n\n``settings`` depends on ``type``: see ``HttpSettings``, ``DnsSettings``, ``TcpSettings``, and\n``IcmpSettings``. Targets that resolve to private or internal addresses are rejected."
       },
       "MonitorEvent": {
         "properties": {
@@ -5871,7 +5940,8 @@
           "kind",
           "message"
         ],
-        "title": "MonitorEvent"
+        "title": "MonitorEvent",
+        "description": "An entry in a monitor's recent-events feed, from incidents or the audit log."
       },
       "MonitorOut": {
         "properties": {
@@ -5989,7 +6059,8 @@
           "created_at",
           "updated_at"
         ],
-        "title": "MonitorOut"
+        "title": "MonitorOut",
+        "description": "A monitor and its current state.\n\n``state`` is ``unknown`` (no recent data), ``up``, ``degraded`` (some regions failing or slow), ``down``\n(all regions failing), or ``paused``."
       },
       "MonitorUpdate": {
         "properties": {
@@ -6172,7 +6243,8 @@
           "agents",
           "regions"
         ],
-        "title": "Overview"
+        "title": "Overview",
+        "description": "Dashboard summary for the workspace over ``window_hours``.\n\n``availability_pct`` is null when there are no results in the window."
       },
       "Page_IncidentOut_": {
         "properties": {
@@ -6325,7 +6397,8 @@
           "assessment",
           "slow_regions"
         ],
-        "title": "RegionalPerformance"
+        "title": "RegionalPerformance",
+        "description": "Comparison of a monitor's performance across regions and agents for a time window."
       },
       "RegisterRequest": {
         "properties": {
@@ -6360,7 +6433,8 @@
           "password",
           "name"
         ],
-        "title": "RegisterRequest"
+        "title": "RegisterRequest",
+        "description": "Create an account and its first workspace. Passwords must be 10-256 characters."
       },
       "ResultAck": {
         "properties": {
@@ -6401,7 +6475,8 @@
           "result_id",
           "status"
         ],
-        "title": "ResultAck"
+        "title": "ResultAck",
+        "description": "Per-result outcome of a submission.\n\n``accepted`` means stored, ``duplicate`` means the result or job was already recorded (safe to drop), and\n``rejected`` means it will never be accepted (for example a job leased to another agent); ``reason``\nexplains why."
       },
       "ResultBatch": {
         "properties": {
@@ -6418,7 +6493,8 @@
         "required": [
           "results"
         ],
-        "title": "ResultBatch"
+        "title": "ResultBatch",
+        "description": "Body of ``POST /agent/v1/results``: up to 200 measurement results."
       },
       "ResultBatchResponse": {
         "properties": {
@@ -6434,7 +6510,8 @@
         "required": [
           "acks"
         ],
-        "title": "ResultBatchResponse"
+        "title": "ResultBatchResponse",
+        "description": "Acknowledgements for a :class:`ResultBatch`, one per submitted result."
       },
       "SessionOut": {
         "properties": {
@@ -6465,7 +6542,8 @@
           "user",
           "workspaces"
         ],
-        "title": "SessionOut"
+        "title": "SessionOut",
+        "description": "A new session token (shown once) with the user and their workspaces."
       },
       "Timeseries": {
         "properties": {
@@ -6504,7 +6582,8 @@
           "bucket_seconds",
           "series"
         ],
-        "title": "Timeseries"
+        "title": "Timeseries",
+        "description": "Bucketed history for a monitor. Buckets without results are omitted, not zero-filled."
       },
       "TimeseriesPoint": {
         "properties": {
@@ -6576,7 +6655,8 @@
           "p95_ms",
           "max_ms"
         ],
-        "title": "TimeseriesPoint"
+        "title": "TimeseriesPoint",
+        "description": "Aggregates for one time bucket. ``t`` is the bucket start (UTC)."
       },
       "TimeseriesSeries": {
         "properties": {
@@ -6597,7 +6677,8 @@
           "key",
           "points"
         ],
-        "title": "TimeseriesSeries"
+        "title": "TimeseriesSeries",
+        "description": "Points for one group (a region, an agent id, or ``all``)."
       },
       "UserOut": {
         "properties": {
@@ -6627,7 +6708,8 @@
           "name",
           "created_at"
         ],
-        "title": "UserOut"
+        "title": "UserOut",
+        "description": "Public profile of a user account."
       },
       "ValidationError": {
         "properties": {
@@ -6682,7 +6764,8 @@
         "required": [
           "name"
         ],
-        "title": "WorkspaceCreate"
+        "title": "WorkspaceCreate",
+        "description": "Create another workspace owned by the caller."
       },
       "WorkspaceOut": {
         "properties": {
@@ -6728,7 +6811,8 @@
           "min_interval_seconds",
           "created_at"
         ],
-        "title": "WorkspaceOut"
+        "title": "WorkspaceOut",
+        "description": "A workspace and its limits. ``role`` is the caller's role when listed for a user."
       }
     }
   }

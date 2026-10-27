@@ -48,10 +48,13 @@ regions, and alerts when checks fail.
                                                  │ agent health, notifications, retention
 ```
 
-Details: [docs/architecture.md](docs/architecture.md) · Security:
-[docs/security.md](docs/security.md) · API guide: [docs/api.md](docs/api.md) ·
-Operations: [docs/operations.md](docs/operations.md) · Terraform design:
-[docs/terraform.md](docs/terraform.md)
+Documentation index: [docs/README.md](docs/README.md) · Architecture:
+[docs/architecture.md](docs/architecture.md) · Security:
+[docs/security.md](docs/security.md) and [threat model & review](docs/security-review.md) ·
+API guide: [docs/api.md](docs/api.md) · Operations: [docs/operations.md](docs/operations.md) ·
+Backups: [docs/backup-restore.md](docs/backup-restore.md) · Terraform design:
+[docs/terraform.md](docs/terraform.md) · Contributing: [CONTRIBUTING.md](CONTRIBUTING.md) ·
+AI agents: [AGENTS.md](AGENTS.md)
 
 ## Quick start (Docker Compose)
 
@@ -128,9 +131,14 @@ All CLI output is JSON (stdout); errors are JSON on stderr with exit code 1
 make venv                        # .venv with server, agent, CLI and dev extras (uses uv)
 docker compose up -d db          # PostgreSQL on localhost:5432
 make test-backend                # pytest (creates database probeatlas_test)
-make lint                        # ruff
+make lint                        # ruff (incl. docstring rules) + documentation coverage check
 cd web && npm install && npm run typecheck && npm test && npm run build
+make restore-drill               # back up the compose database, restore it to a scratch DB, compare
 ```
+
+CI (`.github/workflows/ci.yml`) runs lint, the documentation check, pytest on PostgreSQL 16,
+`alembic check`, an OpenAPI drift check, web typecheck/tests/build, and container image builds on every
+push and pull request.
 
 Run components outside Docker:
 
@@ -161,9 +169,11 @@ src/probeatlas/agent/    agent runner, control-plane client, checks/{http,dns,tc
 src/probeatlas/server/   API routers, auth, scheduling, ingestion, alerting, stats, worker
 src/probeatlas/cli/      CLI
 web/                     Next.js dashboard
-deploy/                  Dockerfiles and the demo target
+deploy/                  Dockerfiles, the demo target, and backup/pgbackup.sh
 tests/                   pytest suite (real PostgreSQL, local test servers)
-docs/                    architecture, security, API, operations, Terraform design
+docs/                    architecture, security, threat model, API, operations, backups, Terraform
+scripts/                 check_docstrings.py (documentation coverage, run in CI)
+.github/workflows/       CI
 ```
 
 ## Configuration
@@ -196,7 +206,10 @@ Agent (`PROBEATLAS_AGENT_*` plus `PROBEATLAS_API_URL`): `REGION` (required),
   timings measured from inside some sandboxes and corporate networks pass
   through egress proxies and do not reflect the real path (for example, TCP
   connect times near 0 ms to remote hosts).
-* Rate limits are per API process (in memory).
+* Rate limits are per API process (in memory), and dashboard sign-ins share the web server's
+  auth rate-limit bucket until the web tier forwards client IPs.
+* No external security review yet. Open findings from the internal review are listed in
+  [docs/security-review.md](docs/security-review.md).
 * ICMP needs `net.ipv4.ping_group_range` to include the agent's group; otherwise
   the agent does not advertise ICMP and reports such jobs as `unsupported`.
 * Aggregates are computed at query time from raw results (fine for MVP volumes;

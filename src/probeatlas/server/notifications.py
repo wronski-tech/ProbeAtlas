@@ -33,10 +33,13 @@ from .models import IncidentEvent, NotificationChannel, NotificationDelivery
 log = logging.getLogger("probeatlas.notifications")
 
 MAX_ATTEMPTS = 6
+SEND_TIMEOUT_S = 10
 
 
 @dataclass
 class SendOutcome:
+    """Result of one delivery attempt: whether it succeeded, the HTTP status, and a safe error message."""
+
     ok: bool
     status: int | None
     error: str | None
@@ -46,16 +49,21 @@ Sender = Callable[[NotificationChannel, str, str, dict], SendOutcome]
 
 
 def sign(secret: str, timestamp: str, body: str) -> str:
+    """Return the ``sha256=<hex>`` HMAC signature of ``"<timestamp>.<body>"`` keyed with ``secret``."""
     return "sha256=" + hmac.new(secret.encode(), f"{timestamp}.{body}".encode(), hashlib.sha256).hexdigest()
 
 
 def send_webhook(channel: NotificationChannel, delivery_id: str, event: str, payload: dict) -> SendOutcome:
+    """POST a signed JSON payload to a webhook channel through the SSRF-safe client.
+
+    Redirects are not followed and only 2xx counts as delivered. Never raises for network errors.
+    """
     body = json.dumps({**payload, "delivery_id": delivery_id, "sent_at": datetime.now(UTC).isoformat()})
     ts = str(int(time.time()))
     out = http_request(
         channel.url,
         policy=get_settings().webhook_policy(),
-        timeout_s=10,
+        timeout_s=SEND_TIMEOUT_S,
         method="POST",
         body=body.encode(),
         headers={
@@ -77,6 +85,14 @@ def send_webhook(channel: NotificationChannel, delivery_id: str, event: str, pay
 
 
 def deliver_pending(db: Session, sender: Sender = send_webhook, now: datetime | None = None, batch: int = 50) -> int:
+    """Send due notification deliveries from the outbox, retrying with exponential backoff.
+
+    Rows are leased for longer than the batch can take to send, and their locks are released before any
+    network call. After ``MAX_ATTEMPTS`` a delivery is marked ``failed`` and a ``notification_failed`` event
+    is added to the incident.
+    ``sender`` is injectable so tests never send real notifications. Returns the number of deliveries
+    processed.
+    """
     now = now or datetime.now(UTC)
     rows = db.execute(
         select(NotificationDelivery)
@@ -85,9 +101,11 @@ def deliver_pending(db: Session, sender: Sender = send_webhook, now: datetime | 
         .limit(batch)
         .with_for_update(skip_locked=True)
     ).scalars().all()
-    # Lease the rows, then release locks before making network calls.
+    # Lease the rows for longer than sending the whole batch can take, then release the row locks before
+    # making network calls. A shorter lease would let another worker pick up and resend rows still queued here.
+    lease = timedelta(seconds=SEND_TIMEOUT_S * len(rows) + 60)
     for d in rows:
-        d.next_attempt_at = now + timedelta(seconds=60)
+        d.next_attempt_at = now + lease
     db.commit()
 
     for d in rows:
@@ -123,5 +141,6 @@ def deliver_pending(db: Session, sender: Sender = send_webhook, now: datetime | 
 
 
 def send_test(channel: NotificationChannel) -> SendOutcome:
+    """Send a ``test`` event to ``channel`` immediately and return the outcome."""
     payload = {"event": "test", "message": "ProbeAtlas test notification", "channel_id": str(channel.id)}
     return send_webhook(channel, str(uuid.uuid4()), "test", payload)

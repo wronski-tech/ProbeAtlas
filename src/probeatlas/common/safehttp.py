@@ -12,12 +12,15 @@ that every hop:
 
 from __future__ import annotations
 
+import contextlib
 import http.client
+import os
 import socket
 import ssl
+import threading
 import time
 from dataclasses import dataclass, field
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import SplitResult, urljoin, urlsplit
 
 from .netpolicy import (
     BlockedTargetError,
@@ -37,6 +40,7 @@ class CheckError(Exception):
     """A measurement failure with a stable category and a safe message."""
 
     def __init__(self, category: FailureCategory, message: str):
+        """Store the failure ``category`` and a message that is safe to show to customers."""
         super().__init__(message)
         self.category = category
         self.message = message
@@ -44,6 +48,13 @@ class CheckError(Exception):
 
 @dataclass
 class HttpOutcome:
+    """Mutable result of :func:`http_request`, filled in hop by hop.
+
+    Timing fields are milliseconds and describe the final hop, except ``total_ms`` which spans the whole
+    request including redirects. Fields that were not reached (for example ``tls_ms`` on plain HTTP or after
+    a connect failure) stay ``None``. ``error`` is set instead of raising.
+    """
+
     status: int | None = None
     final_url: str | None = None
     redirects: int = 0
@@ -61,6 +72,7 @@ class HttpOutcome:
 
 
 def _ms(start: float, end: float) -> float:
+    """Return the elapsed time between two ``perf_counter`` readings in milliseconds (3 decimals)."""
     return round((end - start) * 1000, 3)
 
 
@@ -123,6 +135,11 @@ def connect_checked(
 
 
 def _classify_os_error(exc: BaseException) -> CheckError:
+    """Map a low-level network, TLS, or HTTP parsing exception to a categorized :class:`CheckError`.
+
+    Messages are generic on purpose: they never include response bodies, headers, or resolved private
+    addresses.
+    """
     if isinstance(exc, CheckError):
         return exc
     if isinstance(exc, TimeoutError | socket.timeout):
@@ -210,6 +227,12 @@ def _one_hop(
     ca_file: str | None,
     out: HttpOutcome,
 ) -> None:
+    """Send one HTTP request to ``url`` (no redirect handling) and record timings into ``out``.
+
+    Connects to a policy-validated address, performs TLS with SNI and certificate verification against the
+    original hostname, reads at most ``max_body_bytes`` of the body, and stores a redirect ``Location`` in
+    ``out.details["_location"]`` for :func:`http_request` to validate and follow.
+    """
     parts = urlsplit(url)
     host = parts.hostname or ""
     port = parts.port or (443 if parts.scheme == "https" else 80)
@@ -217,6 +240,52 @@ def _one_hop(
     out.tls_ms = out.ttfb_ms = None
     sock, ip, out.dns_ms, out.connect_ms = connect_checked(host, port, policy, deadline)
     out.remote_address = ip
+    # Socket timeouts apply per recv(), so a peer that drips one byte at a time would never trip them.
+    # A watchdog shuts the connection down at the deadline instead; a duplicate descriptor keeps working
+    # after the TLS wrap detaches the original socket object.
+    expired = threading.Event()
+    watch = socket.socket(fileno=os.dup(sock.fileno()))
+
+    def expire() -> None:
+        """Mark the request as timed out and unblock any pending read or write."""
+        expired.set()
+        with contextlib.suppress(OSError):
+            watch.shutdown(socket.SHUT_RDWR)
+
+    timer = threading.Timer(max(deadline - time.perf_counter(), 0.0), expire)
+    timer.daemon = True
+    timer.start()
+    try:
+        _exchange(sock, parts, host, port, method, headers, body, deadline, max_body_bytes, user_agent, ca_file, out)
+    except Exception as exc:
+        if expired.is_set():
+            raise CheckError(FailureCategory.TIMEOUT, "request timed out") from exc
+        raise
+    finally:
+        timer.cancel()
+        watch.close()
+    if expired.is_set():  # the body read may have been cut short
+        raise CheckError(FailureCategory.TIMEOUT, "request timed out")
+
+
+def _exchange(
+    sock: socket.socket,
+    parts: SplitResult,
+    host: str,
+    port: int,
+    method: str,
+    headers: dict[str, str] | None,
+    body: bytes | None,
+    deadline: float,
+    max_body_bytes: int,
+    user_agent: str,
+    ca_file: str | None,
+    out: HttpOutcome,
+) -> None:
+    """Perform TLS (for https), send the request, and read the response over a connected socket.
+
+    Always closes ``sock``. The caller enforces the overall deadline.
+    """
     try:
         if parts.scheme == "https":
             ctx = ssl.create_default_context(cafile=ca_file)

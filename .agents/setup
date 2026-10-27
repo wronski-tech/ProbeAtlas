@@ -61,7 +61,7 @@ if ! grep -Fqx "$marker" "$guide" 2>/dev/null; then
 - Full stack: `sudo docker compose up -d --build` (dashboard :3000, API :8000, worker metrics :9100,
   demo-target control on 127.0.0.1:18081; port 8081 is used by the orb). Share :3000 with `amp orb portal 3000`.
 - Backend tests need PostgreSQL: `sudo docker compose up -d db`, then `.venv/bin/pytest`.
-- Lint: `.venv/bin/ruff check src tests`. Web: `cd web && npm run typecheck && npm test && npm run build`.
+- Lint: `make lint` (ruff + documentation coverage). Backups: `make restore-drill COMPOSE="sudo docker compose"`. Web: `cd web && npm run typecheck && npm test && npm run build`.
 - Outbound TCP from the orb goes through an egress proxy, so connect timings to public hosts are not realistic.
 EOF
 fi

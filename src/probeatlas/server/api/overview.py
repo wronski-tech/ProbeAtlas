@@ -73,5 +73,6 @@ def overview(window_hours: int = Query(24, ge=1, le=24 * 30), p: Principal = Dep
 @router.get("/audit-events", response_model=list[AuditEventOut])
 def audit_events(limit: int = Query(100, ge=1, le=500), p: Principal = Depends(require_owner),
                  db: Session = Depends(get_db)):
+    """List the workspace audit log, newest first (owner only)."""
     return db.execute(select(AuditEvent).where(AuditEvent.workspace_id == p.workspace_id)
                       .order_by(AuditEvent.created_at.desc()).limit(limit)).scalars().all()

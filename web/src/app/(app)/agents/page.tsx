@@ -5,6 +5,7 @@ import { formatDateTime, relativeTime } from "@/lib/format";
 import type { Agent, Location } from "@/lib/types";
 import { Badge, Card, Empty, ErrorBanner, PageHeader, Table, Td } from "@/components/ui";
 
+/** Monitoring agents and regions, with operator-configured locations and heartbeat health. */
 export default function AgentsPage() {
   const { data: agents, error } = useApi<Agent[]>("/v1/agents", 10_000);
   const { data: locations } = useApi<Location[]>("/v1/locations", 10_000);

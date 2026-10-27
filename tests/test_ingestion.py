@@ -12,6 +12,7 @@ from tests.conftest import enroll_agent, make_result, run_scheduler
 
 
 def _setup(client, account, agent):
+    """Create a monitor, schedule it, and claim its job as ``agent``."""
     m = account.create_monitor()
     run_scheduler()
     job = client.post("/agent/v1/jobs/claim", headers=agent["headers"], json={}).json()["jobs"][0]
@@ -19,12 +20,14 @@ def _setup(client, account, agent):
 
 
 def _submit(client, agent, *results):
+    """Submit results as ``agent`` and return the acknowledgements."""
     r = client.post("/agent/v1/results", headers=agent["headers"], json={"results": list(results)})
     assert r.status_code == 200, r.text
     return r.json()["acks"]
 
 
 def _count(db):
+    """Return the number of stored results."""
     return db.execute(select(func.count()).select_from(Result)).scalar_one()
 
 

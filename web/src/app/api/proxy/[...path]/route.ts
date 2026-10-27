@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { proxiedApiPath } from "@/lib/proxy";
 import { backend } from "@/lib/server";
 
 /**
@@ -7,8 +8,8 @@ import { backend } from "@/lib/server";
  * custom headers to cross-site requests without a CORS preflight we never allow.
  */
 async function handle(req: NextRequest, ctx: { params: Promise<{ path: string[] }> }) {
-  const { path } = await ctx.params;
-  if (path[0] !== "v1" || path.some((p) => p === ".." || p === "")) {
+  const apiPath = proxiedApiPath((await ctx.params).path);
+  if (apiPath === null) {
     return NextResponse.json({ error: { code: "not_found", message: "not found" } }, { status: 404 });
   }
   if (req.method !== "GET" && req.headers.get("x-probeatlas-csrf") !== "1") {
@@ -16,7 +17,7 @@ async function handle(req: NextRequest, ctx: { params: Promise<{ path: string[] 
   }
   const init: RequestInit = { method: req.method, headers: { "Content-Type": "application/json" } };
   if (req.method !== "GET" && req.method !== "DELETE") init.body = await req.text();
-  const res = await backend(`/${path.join("/")}${req.nextUrl.search}`, init);
+  const res = await backend(`${apiPath}${req.nextUrl.search}`, init);
   const body = res.status === 204 ? null : await res.text();
   return new NextResponse(body, {
     status: res.status,

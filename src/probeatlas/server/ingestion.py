@@ -29,12 +29,17 @@ _CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
 
 
 def sanitize_message(msg: str | None) -> str | None:
+    """Strip control characters, redact secrets, and truncate an agent error message to 500 chars."""
     if not msg:
         return None
     return redact(_CONTROL_CHARS.sub(" ", msg))[:500]
 
 
 def ingest_results(db: Session, agent: Agent, results: list[MeasurementResult]) -> list[ResultAck]:
+    """Ingest a batch of results from ``agent``, committing each result independently.
+
+    One bad result never blocks the rest of the batch. Returns one acknowledgement per result.
+    """
     acks = []
     for r in results:
         try:
@@ -53,7 +58,14 @@ def ingest_results(db: Session, agent: Agent, results: list[MeasurementResult]) 
 
 
 def _ingest_one(db: Session, agent: Agent, r: MeasurementResult) -> ResultAck:
+    """Validate and store one result, then update monitor state and evaluate alert rules.
+
+    Rejects results for unknown jobs, jobs leased to another agent, cancelled jobs, mismatched check types,
+    and implausible timestamps. A resubmitted result is acknowledged as ``duplicate``. Results that arrive
+    after the lease (within ``late_result_window_seconds``) are stored with ``late=True``.
+    """
     def reject(reason: str) -> ResultAck:
+        """Build a ``rejected`` acknowledgement for this result with ``reason``."""
         return ResultAck(job_id=r.job_id, result_id=r.result_id, status="rejected", reason=reason)
 
     now = datetime.now(UTC)

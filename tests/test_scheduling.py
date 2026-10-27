@@ -12,12 +12,14 @@ from tests.conftest import enroll_agent, force_due, past, run_scheduler
 
 
 def _claim(client, agent, n=10):
+    """Claim up to ``n`` jobs as ``agent``."""
     r = client.post("/agent/v1/jobs/claim", headers=agent["headers"], json={"max_jobs": n})
     assert r.status_code == 200, r.text
     return r.json()["jobs"]
 
 
 def _jobs(db):
+    """Return all jobs, reloaded from the database, ordered by region."""
     db.expire_all()
     return db.execute(select(Job).order_by(Job.region)).scalars().all()
 

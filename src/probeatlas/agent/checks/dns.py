@@ -1,3 +1,5 @@
+"""DNS resolution check."""
+
 from __future__ import annotations
 
 import ipaddress
@@ -74,4 +76,5 @@ def run_dns(job: JobSpec, ctx: CheckContext) -> MeasurementResult:
 
 
 def _ms(start: float) -> float:
+    """Return milliseconds elapsed since the ``perf_counter`` reading ``start``."""
     return round((time.perf_counter() - start) * 1000, 3)

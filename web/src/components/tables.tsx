@@ -5,6 +5,7 @@ import type { GroupPerformance, Measurement, Monitor } from "@/lib/types";
 import { formatDateTime, formatMs, formatPct, relativeTime } from "@/lib/format";
 import { Badge, Empty, ResultBadge, Table, Td, cx } from "./ui";
 
+/** Table of raw measurements. Unmeasured values render as an em dash, never as 0. */
 export function MeasurementsTable({ items, monitors, agents, showMonitor = true }: {
   items: Measurement[];
   monitors?: Record<string, Monitor>;
@@ -52,6 +53,7 @@ export function MeasurementsTable({ items, monitors, agents, showMonitor = true 
   );
 }
 
+/** Per-region (or per-agent) comparison: success rate, missing checks, and latency percentiles. */
 export function RegionTable({ groups, slow = [], showAgent = false, showPercentiles = true }: {
   groups: GroupPerformance[];
   slow?: string[];
@@ -116,6 +118,7 @@ export function RegionTable({ groups, slow = [], showAgent = false, showPercenti
   );
 }
 
+/** Badge for a monitor's current state. */
 export function StateBadge({ monitor }: { monitor: Pick<Monitor, "state"> }) {
   return <Badge value={monitor.state} />;
 }

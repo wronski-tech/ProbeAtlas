@@ -1,3 +1,5 @@
+"""Shared types and helpers for check implementations."""
+
 from __future__ import annotations
 
 import logging
@@ -11,6 +13,12 @@ from probeatlas.common.schemas import CheckType, FailureCategory, JobSpec, Measu
 
 @dataclass
 class CheckContext:
+    """Per-agent dependencies passed to every check.
+
+    ``policy`` is the outbound network policy every check must enforce; ``capabilities`` lists the check
+    types this agent advertised.
+    """
+
     policy: NetworkPolicy
     capabilities: list[CheckType]
     user_agent: str = "ProbeAtlas-Agent/0.1"
@@ -21,6 +29,7 @@ class CheckContext:
 def failure(
     job: JobSpec, measured_at: datetime, category: FailureCategory, message: str, **fields
 ) -> MeasurementResult:
+    """Build a failed :class:`MeasurementResult` for ``job`` with a category, message, and optional fields."""
     return MeasurementResult(
         result_id=uuid.uuid4(),
         job_id=job.job_id,

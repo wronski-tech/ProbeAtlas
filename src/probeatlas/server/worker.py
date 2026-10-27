@@ -32,6 +32,7 @@ RETENTION_EVERY_S = 3600
 
 
 def run_task(name: str, fn: Callable[[Session], object]) -> None:
+    """Run one worker task in its own session, recording duration and errors without propagating them."""
     start = time.perf_counter()
     with new_session() as db:
         try:
@@ -44,14 +45,26 @@ def run_task(name: str, fn: Callable[[Session], object]) -> None:
 
 
 def tick() -> None:
+    """Run one pass of the scheduling tasks: schedule, reap jobs, agent health, and staleness."""
     run_task("schedule", schedule_due)
     run_task("reap_jobs", reap_jobs)
     run_task("agent_health", mark_stale_agents)
     run_task("monitor_staleness", mark_no_data_monitors)
-    run_task("notifications", deliver_pending)
+
+
+def notification_loop(stop: threading.Event, interval_s: float) -> None:
+    """Deliver webhooks until ``stop`` is set.
+
+    Runs in its own thread so slow or unresponsive webhook receivers can never delay scheduling, job
+    recovery, or agent health checks.
+    """
+    while not stop.is_set():
+        run_task("notifications", deliver_pending)
+        stop.wait(interval_s)
 
 
 def main() -> None:
+    """Worker entry point (``probeatlas-worker``): loop over :func:`tick` until SIGTERM or SIGINT."""
     setup_logging("worker")
     settings = get_settings()
     stop = threading.Event()
@@ -61,6 +74,9 @@ def main() -> None:
         start_http_server(settings.worker_metrics_port)
     log.info("worker started", extra=log_fields(tick_s=settings.worker_tick_seconds,
                                                 metrics_port=settings.worker_metrics_port))
+    notifier = threading.Thread(target=notification_loop, args=(stop, settings.worker_tick_seconds),
+                                name="notifications", daemon=True)
+    notifier.start()
     last_retention = 0.0
     while not stop.is_set():
         tick()
@@ -68,6 +84,7 @@ def main() -> None:
             run_task("retention", apply_retention)
             last_retention = time.monotonic()
         stop.wait(settings.worker_tick_seconds)
+    notifier.join(timeout=30)
     log.info("worker stopped")
 
 

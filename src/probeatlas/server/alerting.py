@@ -57,6 +57,11 @@ def verdict(rule: AlertRule, r: ResultRow) -> bool | None:
 
 
 def evaluate_result(db: Session, monitor: Monitor, r: ResultRow) -> None:
+    """Update every enabled alert rule of ``monitor`` with a newly ingested result.
+
+    Runs in the ingestion transaction. Each (rule, region) streak is locked and records the last result it
+    counted, so a result applied twice does not advance the streak twice.
+    """
     rules = db.execute(
         select(AlertRule).where(AlertRule.monitor_id == monitor.id, AlertRule.enabled.is_(True))
     ).scalars().all()
@@ -90,6 +95,7 @@ def evaluate_result(db: Session, monitor: Monitor, r: ResultRow) -> None:
 
 
 def _scope(monitor: Monitor, firing: list[str]) -> str:
+    """Return ``single_region``, ``global`` (every configured region firing), or ``regional``."""
     if len(monitor.regions) <= 1:
         return "single_region"
     return "global" if set(monitor.regions) <= set(firing) else "regional"
@@ -98,6 +104,11 @@ def _scope(monitor: Monitor, firing: list[str]) -> str:
 def reconcile_incident(
     db: Session, monitor: Monitor, rule: AlertRule, r: ResultRow, *, region_firing: bool, region: str
 ) -> None:
+    """Open, update, or resolve the rule's incident after a region started or stopped firing.
+
+    Locks the rule row so concurrent ingestions serialize. Opening or resolving an incident enqueues
+    notifications in the same transaction.
+    """
     # Serialize incident changes per rule.
     db.execute(select(AlertRule.id).where(AlertRule.id == rule.id).with_for_update())
     firing = sorted(
@@ -156,11 +167,13 @@ def reconcile_incident(
 
 
 def _event(db: Session, incident: Incident, kind: str, message: str, details: dict) -> None:
+    """Append a timeline event to ``incident`` (caller commits)."""
     db.add(IncidentEvent(workspace_id=incident.workspace_id, incident_id=incident.id, kind=kind,
                          message=message, details=details))
 
 
 def incident_payload(monitor: Monitor, incident: Incident, event: str) -> dict:
+    """Build the JSON payload sent to notification channels for an incident ``event``."""
     return {
         "event": event,
         "incident": {

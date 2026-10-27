@@ -4,6 +4,7 @@ import { sessionContext } from "@/lib/server";
 
 export const dynamic = "force-dynamic";
 
+/** Authenticated shell: redirects to /login without a session and renders the sidebar. */
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const ctx = await sessionContext();
   if (!ctx) redirect("/login");

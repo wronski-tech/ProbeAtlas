@@ -1,9 +1,9 @@
 """Operator commands: migrations, agent enrollment, agent management.
 
-    probeatlas-admin migrate
-    probeatlas-admin create-enrollment-token --region eu-central --max-uses 1 --expires-in-hours 24
-    probeatlas-admin list-agents
-    probeatlas-admin disable-agent <agent-id>
+probeatlas-admin migrate
+probeatlas-admin create-enrollment-token --region eu-central --max-uses 1 --expires-in-hours 24
+probeatlas-admin list-agents
+probeatlas-admin disable-agent <agent-id>
 """
 
 from __future__ import annotations
@@ -19,6 +19,7 @@ from sqlalchemy import select
 
 
 def migrate(revision: str = "head") -> None:
+    """Apply Alembic migrations up to ``revision`` against ``PROBEATLAS_DATABASE_URL``."""
     from alembic import command
     from alembic.config import Config
 
@@ -31,6 +32,7 @@ def migrate(revision: str = "head") -> None:
 
 
 def main(argv: list[str] | None = None) -> None:
+    """Parse ``probeatlas-admin`` arguments and run the selected operator command."""
     parser = argparse.ArgumentParser(prog="probeatlas-admin")
     sub = parser.add_subparsers(dest="cmd", required=True)
     sub.add_parser("migrate", help="apply database migrations")

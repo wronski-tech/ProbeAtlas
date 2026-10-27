@@ -7,6 +7,7 @@ import type { Monitor } from "@/lib/types";
 import { Card, PageHeader } from "@/components/ui";
 import { MonitorForm } from "@/components/MonitorForm";
 
+/** Create a monitor and open its detail page. */
 export default function NewMonitorPage() {
   const router = useRouter();
   const [defaultRule, setDefaultRule] = useState(true);

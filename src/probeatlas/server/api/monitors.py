@@ -38,6 +38,7 @@ router = APIRouter(prefix="/v1/monitors", tags=["monitors"])
 
 
 def _validate_regions(db: Session, regions: list[str], settings: Settings) -> None:
+    """Reject region lists that exceed the limit or name regions without an active agent."""
     if len(regions) > settings.max_regions_per_monitor:
         raise APIError(422, "validation_error", f"at most {settings.max_regions_per_monitor} regions per monitor")
     known = set(db.execute(select(Agent.region).where(Agent.status != "disabled").distinct()).scalars())
@@ -49,6 +50,7 @@ def _validate_regions(db: Session, regions: list[str], settings: Settings) -> No
 
 
 def _validate_limits(ws: Workspace, interval: int, timeout_ms: int, settings: Settings) -> None:
+    """Enforce the workspace's minimum interval, the maximum timeout, and timeout <= interval."""
     if interval < ws.min_interval_seconds:
         raise APIError(422, "validation_error",
                        f"interval_seconds must be at least {ws.min_interval_seconds} for this workspace")
@@ -67,6 +69,7 @@ def list_monitors(
     p: Principal = Depends(get_principal),
     db: Session = Depends(get_db),
 ):
+    """List monitors, newest first, optionally filtered by state and type. Cursor-paginated."""
     q = select(Monitor).where(Monitor.workspace_id == p.workspace_id)
     if state == "paused":
         q = q.where(Monitor.is_paused.is_(True))
@@ -86,6 +89,11 @@ def list_monitors(
 @router.post("", response_model=MonitorOut, status_code=201)
 def create_monitor(body: MonitorCreate, p: Principal = Depends(get_principal), db: Session = Depends(get_db),
                    settings: Settings = Depends(get_settings)):
+    """Create a monitor. Checks are scheduled immediately unless ``paused`` is true.
+
+    Validates type-specific settings, workspace limits, region availability, and the target against the
+    outbound network policy.
+    """
     ws = db.get(Workspace, p.workspace_id)
     count = db.execute(select(func.count()).select_from(Monitor).where(Monitor.workspace_id == ws.id)).scalar_one()
     if count >= ws.max_monitors:
@@ -111,12 +119,17 @@ def create_monitor(body: MonitorCreate, p: Principal = Depends(get_principal), d
 
 @router.get("/{monitor_id}", response_model=MonitorOut)
 def get_monitor(monitor_id: uuid.UUID, p: Principal = Depends(get_principal), db: Session = Depends(get_db)):
+    """Get one monitor and its current state."""
     return MonitorOut.of(tenant_get(db, Monitor, monitor_id, p, "monitor"))
 
 
 @router.patch("/{monitor_id}", response_model=MonitorOut)
 def update_monitor(monitor_id: uuid.UUID, body: MonitorUpdate, p: Principal = Depends(get_principal),
                    db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
+    """Partially update a monitor. Every change increments ``config_version``.
+
+    Jobs that are already scheduled keep the configuration they were created with.
+    """
     m = tenant_get(db, Monitor, monitor_id, p, "monitor")
     changes = body.model_dump(exclude_unset=True)
     if not changes:
@@ -158,6 +171,11 @@ def delete_monitor(monitor_id: uuid.UUID, p: Principal = Depends(get_principal),
 
 
 def _set_paused(monitor_id: uuid.UUID, paused: bool, p: Principal, db: Session) -> MonitorOut:
+    """Pause or resume a monitor; changing to the current state is a no-op.
+
+    Pausing cancels pending jobs. Resuming schedules a check immediately and resets the state to ``unknown``
+    until new results arrive.
+    """
     m = tenant_get(db, Monitor, monitor_id, p, "monitor")
     if m.is_paused != paused:
         m.is_paused = paused
@@ -175,11 +193,13 @@ def _set_paused(monitor_id: uuid.UUID, paused: bool, p: Principal, db: Session) 
 
 @router.post("/{monitor_id}/pause", response_model=MonitorOut)
 def pause_monitor(monitor_id: uuid.UUID, p: Principal = Depends(get_principal), db: Session = Depends(get_db)):
+    """Pause a monitor: stop scheduling checks and cancel pending jobs."""
     return _set_paused(monitor_id, True, p, db)
 
 
 @router.post("/{monitor_id}/resume", response_model=MonitorOut)
 def resume_monitor(monitor_id: uuid.UUID, p: Principal = Depends(get_principal), db: Session = Depends(get_db)):
+    """Resume a paused monitor and schedule a check immediately."""
     return _set_paused(monitor_id, False, p, db)
 
 
@@ -211,6 +231,11 @@ def monitor_timeseries(
     p: Principal = Depends(get_principal),
     db: Session = Depends(get_db),
 ):
+    """Bucketed availability and latency history for a monitor (default: last 24h).
+
+    Group by ``region``, ``agent``, or ``none``. The bucket size is chosen automatically unless
+    ``bucket_seconds`` is given.
+    """
     m = tenant_get(db, Monitor, monitor_id, p, "monitor")
     since, until = stats.parse_window(since, until)
     return stats.timeseries(db, m.id, since, until, group_by, region=region, agent_id=agent_id,

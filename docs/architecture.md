@@ -6,7 +6,7 @@ deployable agents**, with PostgreSQL as the only stateful dependency.
 | Process | Code | Responsibility |
 | --- | --- | --- |
 | `api` | `probeatlas.server.main` | Public REST API (`/v1`), agent protocol (`/agent/v1`), auth, tenant isolation |
-| `worker` | `probeatlas.server.worker` | Scheduling, lease recovery, agent health, stale-state detection, notification delivery, retention |
+| `worker` | `probeatlas.server.worker` | Scheduling, lease recovery, agent health, stale-state detection, retention; webhook delivery in a separate thread so slow receivers never delay scheduling |
 | `agent` | `probeatlas.agent` | Enrollment, heartbeat, job polling, measurement, result submission |
 | `web` | `web/` (Next.js) | Dashboard; same-origin proxy to the API using an httpOnly session cookie |
 | `cli` | `probeatlas.cli` | API-key client with JSON output |

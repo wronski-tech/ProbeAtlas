@@ -17,6 +17,7 @@ FAIL = {"success": False, "category": "timeout", "http_status": None}
 
 
 def _rule(account, monitor_id, **kw):
+    """Create an ``unavailable`` rule (2 breaches / 2 recoveries unless overridden)."""
     body = {"monitor_id": monitor_id, "kind": "unavailable", "consecutive_breaches": 2, "recovery_successes": 2}
     body.update(kw)
     r = account.post("/v1/alert-rules", body)
@@ -25,6 +26,7 @@ def _rule(account, monitor_id, **kw):
 
 
 def _incidents(account, **params):
+    """List the account's incidents with optional filters."""
     return account.get("/v1/incidents", params=params).json()["items"]
 
 
@@ -197,3 +199,11 @@ def test_monitor_without_recent_data_becomes_unknown(client, account, agent_a, d
     db.commit()
     assert mark_no_data_monitors(db) == 1
     assert account.get(f"/v1/monitors/{m['id']}").json()["state"] == "unknown"
+
+
+def test_notification_channels_are_capped_per_workspace(account):
+    for i in range(10):
+        r = account.post("/v1/notification-channels", {"name": f"c{i}", "url": f"https://hooks.example.com/{i}"})
+        assert r.status_code == 201, r.text
+    r = account.post("/v1/notification-channels", {"name": "c10", "url": "https://hooks.example.com/10"})
+    assert r.status_code == 403 and r.json()["error"]["code"] == "limit_exceeded"

@@ -20,6 +20,11 @@ STRICT = NetworkPolicy()
         "64:ff9b::a9fe:a9fe",  # NAT64-embedded 169.254.169.254
         "2002:7f00:1::",  # 6to4-embedded 127.0.0.1
         "fd00:ec2::254",
+        "::7f00:1",  # IPv4-compatible 127.0.0.1
+        "::a9fe:a9fe",  # IPv4-compatible 169.254.169.254
+        "::ffff:0:7f00:1",  # SIIT-translated 127.0.0.1
+        "64:ff9b:1::7f00:1",  # local-use NAT64 (RFC 8215)
+        "fec0::1",  # deprecated site-local
     ],
 )
 def test_non_public_addresses_blocked(ip):

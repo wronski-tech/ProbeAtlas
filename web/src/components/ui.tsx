@@ -4,10 +4,12 @@ import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode, SelectHTMLAt
 import { TIME_RANGES, type TimeRangeKey } from "@/lib/format";
 import type { ApiError } from "@/lib/api";
 
+/** Join class names, skipping falsy values. */
 export function cx(...c: (string | false | null | undefined)[]) {
   return c.filter(Boolean).join(" ");
 }
 
+/** Bordered panel with an optional title and header actions. */
 export function Card({ title, actions, children, className }: { title?: ReactNode; actions?: ReactNode; children: ReactNode; className?: string }) {
   return (
     <section className={cx("min-w-0 rounded-lg border border-slate-200 bg-white", className)}>
@@ -41,6 +43,7 @@ const STATE_STYLES: Record<string, string> = {
   paused: "bg-sky-50 text-sky-700 ring-sky-600/20",
 };
 
+/** Colored status pill for states such as up, down, open, or offline. */
 export function Badge({ value, label }: { value: string; label?: string }) {
   return (
     <span className={cx("inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset", STATE_STYLES[value] ?? STATE_STYLES.unknown)}>
@@ -50,10 +53,12 @@ export function Badge({ value, label }: { value: string; label?: string }) {
   );
 }
 
+/** Pill for a single measurement outcome: `ok` or its failure category. */
 export function ResultBadge({ success, category }: { success: boolean; category?: string | null }) {
   return success ? <Badge value="ok" label="success" /> : <Badge value="failed" label={category?.replaceAll("_", " ") ?? "failed"} />;
 }
 
+/** Button with primary, secondary, danger, and ghost variants. */
 export function Button({ variant = "primary", className, ...props }: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: "primary" | "secondary" | "danger" | "ghost" }) {
   const styles = {
     primary: "bg-slate-900 text-white hover:bg-slate-700 disabled:bg-slate-400",
@@ -64,6 +69,7 @@ export function Button({ variant = "primary", className, ...props }: ButtonHTMLA
   return <button className={cx("inline-flex items-center justify-center gap-1 rounded-md px-3 py-1.5 text-sm font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600", styles, className)} {...props} />;
 }
 
+/** Labeled form field with an optional hint. */
 export function Field({ label, hint, children }: { label: string; hint?: ReactNode; children: ReactNode }) {
   return (
     <label className="block text-sm">
@@ -79,10 +85,12 @@ const inputCls = "block rounded-md border border-slate-300 bg-white px-2.5 py-1.
 /** Full width unless the caller sets an explicit width class. */
 const width = (className?: string) => (/(^|\s)w-/.test(className ?? "") ? "" : "w-full");
 
+/** Styled text input. */
 export function Input(props: InputHTMLAttributes<HTMLInputElement>) {
   return <input {...props} className={cx(inputCls, width(props.className), props.className)} />;
 }
 
+/** Styled select. */
 export function Select({ children, ...props }: SelectHTMLAttributes<HTMLSelectElement>) {
   return (
     <select {...props} className={cx(inputCls, width(props.className), "pr-8", props.className)}>
@@ -91,6 +99,7 @@ export function Select({ children, ...props }: SelectHTMLAttributes<HTMLSelectEl
   );
 }
 
+/** Error message for an API error (including validation details), Error, or string. */
 export function ErrorBanner({ error }: { error?: ApiError | Error | string | null }) {
   if (!error) return null;
   const msg = typeof error === "string" ? error : "describe" in error ? (error as ApiError).describe() : error.message;
@@ -101,10 +110,12 @@ export function ErrorBanner({ error }: { error?: ApiError | Error | string | nul
   );
 }
 
+/** Placeholder shown when a list has no items. */
 export function Empty({ children }: { children: ReactNode }) {
   return <p className="py-6 text-center text-sm text-slate-500">{children}</p>;
 }
 
+/** Single metric tile with optional sub-text and tone. */
 export function Stat({ label, value, sub, tone }: { label: string; value: ReactNode; sub?: ReactNode; tone?: "good" | "bad" | "warn" }) {
   return (
     <div className="rounded-lg border border-slate-200 bg-white px-4 py-3">
@@ -115,6 +126,7 @@ export function Stat({ label, value, sub, tone }: { label: string; value: ReactN
   );
 }
 
+/** Segmented control for choosing a time window. */
 export function RangePicker({ value, onChange }: { value: TimeRangeKey; onChange: (v: TimeRangeKey) => void }) {
   return (
     <div role="group" aria-label="Time range" className="inline-flex rounded-md border border-slate-300 bg-white p-0.5">
@@ -133,6 +145,7 @@ export function RangePicker({ value, onChange }: { value: TimeRangeKey; onChange
   );
 }
 
+/** Responsive table with a header row and an empty state. */
 export function Table({ head, children, empty }: { head: ReactNode[]; children: ReactNode; empty?: ReactNode }) {
   return (
     <div className="-mx-4 overflow-x-auto">
@@ -153,6 +166,7 @@ export function Table({ head, children, empty }: { head: ReactNode[]; children: 
   );
 }
 
+/** Table cell. */
 export function Td({ children, className, title }: { children: ReactNode; className?: string; title?: string }) {
   return (
     <td title={title} className={cx("whitespace-nowrap px-3 py-2 text-slate-700 first:pl-4 last:pr-4", className)}>
@@ -161,6 +175,7 @@ export function Td({ children, className, title }: { children: ReactNode; classN
   );
 }
 
+/** Page title with optional subtitle and actions. */
 export function PageHeader({ title, subtitle, actions }: { title: ReactNode; subtitle?: ReactNode; actions?: ReactNode }) {
   return (
     <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
@@ -173,6 +188,7 @@ export function PageHeader({ title, subtitle, actions }: { title: ReactNode; sub
   );
 }
 
+/** Shows a newly issued secret once, with copy and dismiss buttons. */
 export function SecretOnce({ label, secret, onDone }: { label: string; secret: string; onDone: () => void }) {
   return (
     <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm">

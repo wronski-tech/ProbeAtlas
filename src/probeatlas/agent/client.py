@@ -25,7 +25,18 @@ class AuthError(Exception):
 
 
 class ControlPlaneClient:
+    """Synchronous client for the agent protocol (``/agent/v1``).
+
+    Maps HTTP outcomes to exceptions the run loop understands: :class:`TransientError` for network failures,
+    429, and 5xx (retry with backoff); :class:`AuthError` for 401/403 (re-enroll); ``ValueError`` for other
+    4xx responses (a bug or a schema mismatch).
+    """
+
     def __init__(self, api_url: str, timeout_s: float = 10.0, transport: httpx.BaseTransport | None = None):
+        """Create a client for the control plane at ``api_url``.
+
+        ``transport`` lets tests route requests to an in-process ASGI app instead of the network.
+        """
         self._http = httpx.Client(
             base_url=api_url,
             timeout=timeout_s,
@@ -36,11 +47,16 @@ class ControlPlaneClient:
         self._token: str | None = None
 
     def set_credentials(self, agent_id: str, token: str) -> None:
+        """Use ``agent_id`` and its bearer ``token`` for all subsequent requests."""
         self.agent_id = agent_id
         self._token = token
         self._http.headers["User-Agent"] = f"ProbeAtlas-Agent/{__version__} ({agent_id})"
 
     def _request(self, method: str, path: str, *, token: str | None = None, json: dict | None = None) -> dict:
+        """Send an authenticated JSON request and return the decoded response body.
+
+        ``token`` overrides the stored agent token (used for the enrollment call).
+        """
         headers = {"Authorization": f"Bearer {token or self._token}"}
         try:
             resp = self._http.request(method, path, json=json, headers=headers)
@@ -55,21 +71,26 @@ class ControlPlaneClient:
         return resp.json()
 
     def register(self, enrollment_token: str, registration: AgentRegistration) -> tuple[str, str]:
+        """Enroll this agent with an enrollment token. Returns ``(agent_id, agent_token)``."""
         data = self._request("POST", "/agent/v1/register", token=enrollment_token,
                              json=registration.model_dump(mode="json"))
         return data["agent_id"], data["agent_token"]
 
     def heartbeat(self, hb: AgentHeartbeat) -> dict:
+        """Report liveness and capabilities; returns the control plane's acknowledgement."""
         return self._request("POST", "/agent/v1/heartbeat", json=hb.model_dump(mode="json"))
 
     def claim(self, max_jobs: int) -> list[JobSpec]:
+        """Lease up to ``max_jobs`` due jobs that this agent is eligible to run."""
         data = self._request("POST", "/agent/v1/jobs/claim", json={"max_jobs": max_jobs})
         return ClaimResponse.model_validate(data).jobs
 
     def submit(self, results: list[MeasurementResult]) -> ResultBatchResponse:
+        """Submit a batch of results and return the per-result acknowledgements."""
         batch = ResultBatch(results=results)
         data = self._request("POST", "/agent/v1/results", json=batch.model_dump(mode="json"))
         return ResultBatchResponse.model_validate(data)
 
     def close(self) -> None:
+        """Close the underlying HTTP connection pool."""
         self._http.close()

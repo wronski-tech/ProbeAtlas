@@ -7,6 +7,7 @@ import { describeTarget, formatInterval, query, relativeTime } from "@/lib/forma
 import type { Monitor, Page } from "@/lib/types";
 import { Badge, Button, Card, Empty, ErrorBanner, PageHeader, Select, Table, Td } from "@/components/ui";
 
+/** Monitor list with state and type filters. */
 export default function MonitorsPage() {
   const [state, setState] = useState("");
   const [type, setType] = useState("");

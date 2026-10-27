@@ -1,3 +1,5 @@
+"""CLI tests: the real argument parsing and output, routed to the in-process API."""
+
 from __future__ import annotations
 
 import json
@@ -11,6 +13,7 @@ from tests.conftest import cycle
 
 @pytest.fixture
 def cli_env(client, monkeypatch, tmp_path):
+    """Isolate the CLI config directory and route CLI HTTP calls to the test app."""
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     monkeypatch.delenv("PROBEATLAS_API_KEY", raising=False)
 
@@ -18,15 +21,19 @@ def cli_env(client, monkeypatch, tmp_path):
         """Route CLI requests into the in-process app with the CLI's credentials."""
 
         def __init__(self, api_url, api_key):
+            """Remember the API key the CLI would authenticate with."""
             self.headers = {"Authorization": f"Bearer {api_key}"}
 
         def request(self, method, path, **kw):
+            """Forward the request to the test client with the CLI's credentials."""
             return client.request(method, path, headers=self.headers, **kw)
 
         def __enter__(self):
+            """Support ``with make_client(...)``."""
             return self
 
         def __exit__(self, *a):
+            """Do nothing on exit; the test client is owned by the fixture."""
             return False
 
     monkeypatch.setattr(cli, "make_client", Wrapped)
@@ -34,6 +41,7 @@ def cli_env(client, monkeypatch, tmp_path):
 
 
 def run(capsys, *argv):
+    """Run the CLI with ``argv`` and return its parsed JSON output."""
     cli.main(list(argv))
     return json.loads(capsys.readouterr().out)
 

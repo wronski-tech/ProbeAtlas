@@ -6,6 +6,7 @@ import { formatDateTime, relativeTime } from "@/lib/format";
 import type { ApiKey, Channel, Member } from "@/lib/types";
 import { Badge, Button, Card, Empty, ErrorBanner, Field, Input, PageHeader, SecretOnce, Select, Table, Td } from "@/components/ui";
 
+/** Workspace settings: API keys, notification channels, and members. */
 export default function SettingsPage() {
   return (
     <>
@@ -19,6 +20,7 @@ export default function SettingsPage() {
   );
 }
 
+/** Run an async action and keep its last API error for display. */
 function useAction() {
   const [error, setError] = useState<ApiError | null>(null);
   const run = async (fn: () => Promise<unknown>) => {
@@ -32,11 +34,13 @@ function useAction() {
   return { error, run };
 }
 
+/** Create, rotate, and revoke API keys. New secrets are shown once. */
 function ApiKeys() {
   const keys = useApi<ApiKey[]>("/v1/api-keys");
   const [secret, setSecret] = useState<string | null>(null);
   const { error, run } = useAction();
 
+  /** Create a key from the form and show its secret once. */
   async function create(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const form = e.currentTarget;
@@ -88,12 +92,14 @@ function ApiKeys() {
   );
 }
 
+/** Manage webhook channels: create (signing secret shown once), test, enable/disable, delete. */
 function Channels() {
   const channels = useApi<Channel[]>("/v1/notification-channels");
   const [secret, setSecret] = useState<string | null>(null);
   const [test, setTest] = useState<Record<string, string>>({});
   const { error, run } = useAction();
 
+  /** Create a channel from the form and show its signing secret once. */
   async function create(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const form = e.currentTarget;
@@ -141,10 +147,12 @@ function Channels() {
   );
 }
 
+/** List, add, and remove workspace members. */
 function Members() {
   const members = useApi<Member[]>("/v1/members");
   const { error, run } = useAction();
 
+  /** Add a registered user to the workspace by email. */
   async function add(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const form = e.currentTarget;

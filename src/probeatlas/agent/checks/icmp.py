@@ -31,11 +31,13 @@ ICMPV6_ECHO_REPLY = 129
 
 
 def _open(family: int) -> socket.socket:
+    """Open an unprivileged ICMP datagram socket for ``family``; raises ``OSError`` if not permitted."""
     proto = socket.IPPROTO_ICMP if family == socket.AF_INET else socket.IPPROTO_ICMPV6
     return socket.socket(family, socket.SOCK_DGRAM, proto)
 
 
 def icmp_supported() -> bool:
+    """Return whether this host can open ping sockets (and ICMP is not disabled by env)."""
     if os.environ.get("PROBEATLAS_AGENT_DISABLE_ICMP") == "1":
         return False
     try:
@@ -46,6 +48,7 @@ def icmp_supported() -> bool:
 
 
 def _checksum(data: bytes) -> int:
+    """Compute the RFC 1071 Internet checksum of ``data``."""
     if len(data) % 2:
         data += b"\0"
     total = sum(struct.unpack(f"!{len(data) // 2}H", data))
@@ -55,6 +58,12 @@ def _checksum(data: bytes) -> int:
 
 
 def run_icmp(job: JobSpec, ctx: CheckContext) -> MeasurementResult:
+    """Send ``packet_count`` echo requests and report round-trip times and packet loss.
+
+    The target is resolved and validated against the network policy first. Partial loss is a success with
+    ``packet_loss_pct`` set (alert rules decide whether it is too high); 100% loss is a ``packet_loss``
+    failure.
+    """
     measured_at = utcnow()
     count = max(1, min(int(job.settings.get("packet_count", 3)), 10))
     timeout_s = job.timeout_ms / 1000

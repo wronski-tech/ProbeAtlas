@@ -19,11 +19,13 @@ DEFAULT_URL = "http://localhost:8000"
 
 
 def config_path() -> Path:
+    """Return the CLI config file path (``$XDG_CONFIG_HOME/probeatlas/config.json``)."""
     base = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
     return Path(base) / "probeatlas" / "config.json"
 
 
 def load_config() -> dict[str, str]:
+    """Load the config file and apply ``PROBEATLAS_API_KEY`` / ``PROBEATLAS_API_URL`` overrides."""
     path = config_path()
     cfg = json.loads(path.read_text()) if path.exists() else {}
     if os.environ.get("PROBEATLAS_API_KEY"):
@@ -35,6 +37,7 @@ def load_config() -> dict[str, str]:
 
 
 def save_config(cfg: dict[str, str]) -> None:
+    """Write the CLI config file with mode 0600, since it contains an API key."""
     path = config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
@@ -43,17 +46,26 @@ def save_config(cfg: dict[str, str]) -> None:
 
 
 def make_client(api_url: str, api_key: str) -> httpx.Client:
+    """Return an HTTP client that authenticates to ``api_url`` with ``api_key``."""
     return httpx.Client(base_url=api_url, timeout=30, headers={"Authorization": f"Bearer {api_key}",
                                                                "User-Agent": "probeatlas-cli/0.1"})
 
 
 class CliError(Exception):
+    """An error to print as JSON on stderr before exiting with ``code`` (1 = API error, 2 = usage)."""
+
     def __init__(self, payload: Any, code: int = 1):
+        """Store the JSON-serializable error ``payload`` and the process exit ``code``."""
         super().__init__(str(payload))
         self.payload, self.code = payload, code
 
 
 def call(client: httpx.Client, method: str, path: str, **kw) -> Any:
+    """Send an API request and return the decoded JSON body.
+
+    Returns ``{"ok": true}`` for 204 responses. Raises :class:`CliError` with the API's error envelope for
+    4xx/5xx responses and with ``connection_error`` when the API is unreachable.
+    """
     try:
         resp = client.request(method, path, **kw)
     except httpx.HTTPError as exc:
@@ -70,6 +82,7 @@ def call(client: httpx.Client, method: str, path: str, **kw) -> Any:
 
 
 def _monitor_body(a: argparse.Namespace) -> dict[str, Any]:
+    """Translate ``monitors create`` arguments into a ``POST /v1/monitors`` request body."""
     settings: dict[str, Any] = {}
     if a.type == "http":
         if a.expected_status:
@@ -92,6 +105,7 @@ def _monitor_body(a: argparse.Namespace) -> dict[str, Any]:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Build the argument parser for every CLI command."""
     p = argparse.ArgumentParser(prog="probeatlas", description="ProbeAtlas CLI (JSON output)")
     p.add_argument("--api-url", help=f"control plane URL (default {DEFAULT_URL})")
     p.add_argument("--api-key", help="API key (pak_...)")
@@ -141,6 +155,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def run(argv: list[str] | None = None) -> Any:
+    """Execute the CLI command in ``argv`` and return its JSON-serializable result."""
     args = build_parser().parse_args(argv)
     cfg = load_config()
     api_url = args.api_url or cfg["api_url"]
@@ -198,6 +213,7 @@ def run(argv: list[str] | None = None) -> Any:
 
 
 def main(argv: list[str] | None = None) -> None:
+    """CLI entry point (``probeatlas``): print the result as JSON, or the error as JSON on stderr."""
     compact = "--compact" in (argv if argv is not None else sys.argv[1:])
     try:
         out = run(argv)

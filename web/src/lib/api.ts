@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+/** Error returned by the API, carrying the HTTP status, stable error `code`, and validation `details`. */
 export class ApiError extends Error {
   constructor(
     public status: number,

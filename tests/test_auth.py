@@ -115,3 +115,17 @@ def test_audit_log_records_security_events(account):
     account.api_key()
     actions = {e["action"] for e in account.get("/v1/audit-events").json()}
     assert {"user.registered", "api_key.created"} <= actions
+
+
+def test_secrets_are_redacted_from_log_messages_and_structured_fields():
+    import json
+    import logging
+
+    from probeatlas.common.logs import JsonFormatter, log_fields
+
+    key = "pak_0123456789ab_" + "s" * 40
+    record = logging.LogRecord("t", logging.WARNING, __file__, 1, f"rejected {key}", None, None)
+    record.fields = log_fields(error=f"401 Authorization: Bearer {key}", count=3)["fields"]
+    out = json.loads(JsonFormatter("api").format(record))
+    assert key not in json.dumps(out)
+    assert out["msg"] == "rejected [REDACTED]" and out["count"] == 3

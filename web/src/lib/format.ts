@@ -17,6 +17,7 @@ export function formatPct(v: number | null | undefined, { ratio = false, digits 
   return `${pct.toFixed(digits)}%`;
 }
 
+/** Relative time such as `5m ago` or `in 2h`; `never` when the timestamp is missing. */
 export function relativeTime(iso: string | null | undefined, now: Date = new Date()): string {
   if (!iso) return "never";
   const diff = (now.getTime() - new Date(iso).getTime()) / 1000;
@@ -29,6 +30,7 @@ export function relativeTime(iso: string | null | undefined, now: Date = new Dat
   return `${Math.round(abs / 86400)}d ${suffix}`;
 }
 
+/** Local date and time with seconds; an em dash when the timestamp is missing. */
 export function formatDateTime(iso: string | null | undefined): string {
   if (!iso) return "—";
   const d = new Date(iso);
@@ -42,12 +44,14 @@ export function formatDateTime(iso: string | null | undefined): string {
   });
 }
 
+/** Compact interval label: `30s`, `5m`, `1h`. */
 export function formatInterval(seconds: number): string {
   if (seconds % 3600 === 0) return `${seconds / 3600}h`;
   if (seconds % 60 === 0) return `${seconds / 60}m`;
   return `${seconds}s`;
 }
 
+/** Time windows offered by range pickers. */
 export const TIME_RANGES = [
   { key: "1h", label: "1 hour", hours: 1 },
   { key: "6h", label: "6 hours", hours: 6 },
@@ -56,6 +60,7 @@ export const TIME_RANGES = [
 ] as const;
 export type TimeRangeKey = (typeof TIME_RANGES)[number]["key"];
 
+/** ISO timestamp for the start of the time window `key` (defaults to 24 hours). */
 export function rangeToSince(key: TimeRangeKey, now: Date = new Date()): string {
   const r = TIME_RANGES.find((t) => t.key === key) ?? TIME_RANGES[2];
   return new Date(now.getTime() - r.hours * 3600_000).toISOString();
@@ -82,6 +87,7 @@ export const ASSESSMENT_TEXT: Record<string, string> = {
   no_data: "No measurements in this window",
 };
 
+/** Target as shown in lists: adds the port for TCP and the record type for DNS monitors. */
 export function describeTarget(m: { type: string; target: string; settings: Record<string, unknown> }): string {
   if (m.type === "tcp") return `${m.target}:${m.settings.port}`;
   if (m.type === "dns") return `${m.target} (${m.settings.record_type ?? "A"})`;

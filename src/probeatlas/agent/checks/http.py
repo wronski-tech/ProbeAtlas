@@ -1,3 +1,5 @@
+"""HTTP(S) check."""
+
 from __future__ import annotations
 
 import uuid
@@ -9,6 +11,11 @@ from .base import CheckContext
 
 
 def run_http(job: JobSpec, ctx: CheckContext) -> MeasurementResult:
+    """Request the target URL and record status and phase timings.
+
+    Success requires a response whose status matches ``expected_status_codes`` (default ``2xx``).
+    ``latency_ms`` is the total duration and is ``None`` when no response arrived.
+    """
     s = job.settings
     measured_at = utcnow()
     out = http_request(

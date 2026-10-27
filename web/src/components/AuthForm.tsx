@@ -5,11 +5,13 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Button, ErrorBanner, Field, Input } from "./ui";
 
+/** Sign-in or registration form. The session token is kept in an httpOnly cookie by the server route. */
 export function AuthForm({ mode }: { mode: "login" | "register" }) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  /** Submit credentials to the session route and go to the dashboard on success. */
   async function submit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setBusy(true);
@@ -17,7 +19,7 @@ export function AuthForm({ mode }: { mode: "login" | "register" }) {
     const form = Object.fromEntries(new FormData(e.currentTarget));
     const res = await fetch("/api/session", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "x-probeatlas-csrf": "1" },
       body: JSON.stringify({ action: mode, ...form }),
     });
     const data = await res.json().catch(() => ({}));

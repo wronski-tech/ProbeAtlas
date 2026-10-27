@@ -28,6 +28,12 @@ T = TypeVar("T")
 
 @dataclass(frozen=True)
 class Principal:
+    """The authenticated caller of a workspace-scoped request.
+
+    ``workspace_id`` is the only tenant the caller may access; every query must filter on it.
+    ``actor_type`` is ``user`` (session) or ``api_key``; API keys always act with the ``member`` role.
+    """
+
     workspace_id: uuid.UUID
     actor_type: str  # user | api_key
     actor_id: uuid.UUID
@@ -37,24 +43,29 @@ class Principal:
 
     @property
     def is_owner(self) -> bool:
+        """Whether the caller has the workspace ``owner`` role."""
         return self.role == "owner"
 
 
 def client_ip(request: Request) -> str | None:
+    """Return the client IP address of ``request`` for audit records, if known."""
     return request.client.host if request.client else None
 
 
 def _bearer(authorization: str | None) -> str:
+    """Extract the token from an ``Authorization: Bearer`` header or raise 401."""
     if not authorization or not authorization.lower().startswith("bearer "):
         raise APIError(401, "unauthorized", "missing bearer token", headers={"WWW-Authenticate": "Bearer"})
     return authorization.split(" ", 1)[1].strip()
 
 
 def _now() -> datetime:
+    """Return the current UTC time (module-level so tests can reason about expiry)."""
     return datetime.now(UTC)
 
 
 def _session_user(db: Session, token: str) -> User:
+    """Return the active user for a valid, unexpired, unrevoked session token, or raise 401."""
     row = db.execute(
         select(User)
         .join(UserSession, UserSession.user_id == User.id)
@@ -87,6 +98,12 @@ def get_principal(
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> Principal:
+    """Authenticate the request and resolve the workspace it may act on.
+
+    API keys (``pak_``) are bound to one workspace; an ``X-Workspace-Id`` header that names another workspace
+    is rejected. Sessions (``pas_``) require ``X-Workspace-Id`` and a membership in that workspace;
+    non-members get 404 so workspace ids cannot be probed. Applies the per-workspace rate limit.
+    """
     token = _bearer(authorization)
     ip = client_ip(request)
     if token.startswith(PREFIX_API_KEY + "_"):
@@ -116,6 +133,7 @@ def get_principal(
 
 
 def require_owner(principal: Principal = Depends(get_principal)) -> Principal:
+    """Dependency that allows only a user session with the ``owner`` role (API keys are rejected)."""
     if principal.actor_type != "user" or not principal.is_owner:
         raise APIError(403, "forbidden", "workspace owner role required")
     return principal
@@ -132,6 +150,7 @@ def tenant_get(db: Session, model: type[T], obj_id: uuid.UUID, principal: Princi
 def get_agent(
     authorization: str | None = Header(default=None), db: Session = Depends(get_db)
 ) -> Agent:
+    """Authenticate an agent by its ``paa_`` bearer token. Disabled agents are rejected with 401."""
     token = _bearer(authorization)
     if not token.startswith(PREFIX_AGENT + "_"):
         raise APIError(401, "unauthorized", "agent token required")

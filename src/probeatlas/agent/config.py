@@ -1,3 +1,5 @@
+"""Agent configuration, read from ``PROBEATLAS_AGENT_*`` environment variables."""
+
 from __future__ import annotations
 
 import os
@@ -5,12 +7,20 @@ from dataclasses import dataclass
 
 
 def _env(name: str, default: str | None = None) -> str | None:
+    """Return environment variable ``name``, treating an empty value as unset."""
     value = os.environ.get(name)
     return value if value not in (None, "") else default
 
 
 @dataclass(frozen=True)
 class AgentConfig:
+    """Immutable agent settings.
+
+    ``region``, ``country_code``, ``city``, and ``provider`` are labels the operator sets for where the agent
+    runs; they are reported as configured and never inferred. ``allowed_private_cidrs`` opts into
+    monitoring private addresses and should stay empty for public agents.
+    """
+
     api_url: str
     enrollment_token: str | None
     name: str
@@ -27,6 +37,7 @@ class AgentConfig:
 
     @classmethod
     def from_env(cls) -> AgentConfig:
+        """Load the configuration from the environment; exits if ``PROBEATLAS_AGENT_REGION`` is missing."""
         region = _env("PROBEATLAS_AGENT_REGION")
         if not region:
             raise SystemExit("PROBEATLAS_AGENT_REGION is required (operator-configured location label)")

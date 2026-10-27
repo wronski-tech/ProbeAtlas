@@ -1,3 +1,5 @@
+"""Audit log of security-relevant actions (logins, key changes, monitor changes, enrollment)."""
+
 from __future__ import annotations
 
 import uuid

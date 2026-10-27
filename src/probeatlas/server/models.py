@@ -24,6 +24,8 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
 class Base(DeclarativeBase):
+    """Declarative base. Maps ``uuid.UUID`` to native UUID, ``datetime`` to TIMESTAMPTZ, and dicts to JSONB."""
+
     type_annotation_map = {
         uuid.UUID: UUID(as_uuid=True),
         datetime: DateTime(timezone=True),
@@ -32,14 +34,17 @@ class Base(DeclarativeBase):
 
 
 def _id() -> Mapped[uuid.UUID]:
+    """Return a UUID primary-key column generated in Python with ``uuid4``."""
     return mapped_column(primary_key=True, default=uuid.uuid4)
 
 
 def _created() -> Mapped[datetime]:
+    """Return a creation timestamp column defaulting to the database's ``now()``."""
     return mapped_column(server_default=func.now())
 
 
 def _ws_fk() -> Mapped[uuid.UUID]:
+    """Return the indexed ``workspace_id`` tenant column (cascade-deleted with the workspace)."""
     return mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), index=True)
 
 
@@ -47,6 +52,8 @@ def _ws_fk() -> Mapped[uuid.UUID]:
 
 
 class User(Base):
+    """A person who signs in with email and password. ``password_hash`` is an encoded scrypt hash."""
+
     __tablename__ = "users"
     id: Mapped[uuid.UUID] = _id()
     email: Mapped[str] = mapped_column(String(320), unique=True)
@@ -58,6 +65,8 @@ class User(Base):
 
 
 class UserSession(Base):
+    """A dashboard/CLI login session. Only the SHA-256 hash of the ``pas_`` token is stored."""
+
     __tablename__ = "user_sessions"
     id: Mapped[uuid.UUID] = _id()
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
@@ -68,6 +77,8 @@ class UserSession(Base):
 
 
 class Workspace(Base):
+    """The tenant boundary. Holds per-tenant limits copied from settings at creation time."""
+
     __tablename__ = "workspaces"
     id: Mapped[uuid.UUID] = _id()
     name: Mapped[str] = mapped_column(String(100))
@@ -77,6 +88,8 @@ class Workspace(Base):
 
 
 class Membership(Base):
+    """A user's role in a workspace: ``owner`` (manages keys, members, channels) or ``member``."""
+
     __tablename__ = "memberships"
     workspace_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("workspaces.id", ondelete="CASCADE"), primary_key=True
@@ -88,6 +101,12 @@ class Membership(Base):
 
 
 class ApiKey(Base):
+    """A workspace-scoped API key for programmatic access.
+
+    Only the SHA-256 hash of the full key is stored; ``prefix`` is the non-secret identifier shown in UIs.
+    Revoked or expired keys are rejected.
+    """
+
     __tablename__ = "api_keys"
     id: Mapped[uuid.UUID] = _id()
     workspace_id: Mapped[uuid.UUID] = _ws_fk()
@@ -105,6 +124,13 @@ class ApiKey(Base):
 
 
 class Monitor(Base):
+    """A monitoring target and how to check it.
+
+    ``settings`` holds check-type-specific options (expected status codes, DNS record type, TCP port, ICMP
+    packet count). ``state`` is derived from recent results; ``next_run_at`` drives the scheduler; and
+    ``config_version`` increments on every configuration change so results can be tied to a configuration.
+    """
+
     __tablename__ = "monitors"
     id: Mapped[uuid.UUID] = _id()
     workspace_id: Mapped[uuid.UUID] = _ws_fk()
@@ -133,6 +159,12 @@ class Monitor(Base):
 
 
 class AlertRule(Base):
+    """A condition on a monitor's results that opens an incident.
+
+    ``consecutive_breaches`` and ``recovery_successes`` provide hysteresis per region; ``min_regions`` is
+    how many regions must be firing before an incident opens.
+    """
+
     __tablename__ = "alert_rules"
     id: Mapped[uuid.UUID] = _id()
     workspace_id: Mapped[uuid.UUID] = _ws_fk()
@@ -165,6 +197,8 @@ class AlertState(Base):
 
 
 class Incident(Base):
+    """A period during which an alert rule was firing. At most one open incident exists per rule."""
+
     __tablename__ = "incidents"
     id: Mapped[uuid.UUID] = _id()
     workspace_id: Mapped[uuid.UUID] = _ws_fk()
@@ -184,6 +218,8 @@ class Incident(Base):
 
 
 class IncidentEvent(Base):
+    """Timeline entry for an incident (opened, regions changed, resolved)."""
+
     __tablename__ = "incident_events"
     id: Mapped[uuid.UUID] = _id()
     workspace_id: Mapped[uuid.UUID] = _ws_fk()
@@ -195,6 +231,8 @@ class IncidentEvent(Base):
 
 
 class NotificationChannel(Base):
+    """A webhook destination for incident notifications, signed with HMAC-SHA256."""
+
     __tablename__ = "notification_channels"
     id: Mapped[uuid.UUID] = _id()
     workspace_id: Mapped[uuid.UUID] = _ws_fk()
@@ -232,6 +270,8 @@ class NotificationDelivery(Base):
 
 
 class EnrollmentToken(Base):
+    """A one-time or limited-use secret that lets an agent register. Stored as a hash."""
+
     __tablename__ = "enrollment_tokens"
     id: Mapped[uuid.UUID] = _id()
     token_hash: Mapped[str] = mapped_column(String(64), unique=True)
@@ -267,6 +307,13 @@ class Agent(Base):
 
 
 class Job(Base):
+    """One scheduled execution of a monitor in one region.
+
+    ``payload`` snapshots the monitor configuration at scheduling time. Lifecycle: ``pending`` -> ``claimed``
+    (leased to an agent until ``lease_expires_at``) -> ``completed``, or ``expired`` / ``cancelled``. The
+    unique ``(monitor_id, region, scheduled_for)`` slot makes scheduling idempotent.
+    """
+
     __tablename__ = "jobs"
     id: Mapped[uuid.UUID] = _id()
     workspace_id: Mapped[uuid.UUID] = _ws_fk()
@@ -335,6 +382,8 @@ class Result(Base):
 
 
 class AuditEvent(Base):
+    """An append-only record of a security-relevant action, with actor, target, and client IP."""
+
     __tablename__ = "audit_events"
     id: Mapped[uuid.UUID] = _id()
     workspace_id: Mapped[uuid.UUID | None] = mapped_column(

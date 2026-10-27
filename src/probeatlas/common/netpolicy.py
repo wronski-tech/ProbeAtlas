@@ -63,10 +63,20 @@ BLOCKED_SUFFIXES = (
 
 _LABEL_RE = re.compile(r"^(?!-)[a-z0-9-]{1,63}(?<!-)$")
 _NAT64 = ipaddress.ip_network("64:ff9b::/96")
+_SIIT = ipaddress.ip_network("::ffff:0:0:0/96")  # RFC 6052/7915 IPv4-translated
+_IPV4_COMPATIBLE = ipaddress.ip_network("::/96")
+# Non-public IPv6 ranges that some Python versions classify as global.
+_EXTRA_BLOCKED = (
+    ipaddress.ip_network("64:ff9b:1::/48"),  # local-use NAT64 (RFC 8215)
+    ipaddress.ip_network("fec0::/10"),  # deprecated site-local
+)
 
-# getaddrinfo() has no timeout parameter; resolve in a small pool so a hung
-# resolver cannot block a check beyond its deadline.
-_resolver_pool = concurrent.futures.ThreadPoolExecutor(max_workers=8, thread_name_prefix="resolve")
+# getaddrinfo() has no timeout parameter; resolve in a pool so a hung resolver cannot block a check beyond
+# its deadline. Abandoned lookups keep their thread until the system resolver gives up (several seconds), so
+# the pool is sized well above agent concurrency: a tenant pointing monitors at unresponsive nameservers
+# must not starve other tenants' lookups. Replacing getaddrinfo with dnspython (hard lifetime) is tracked in
+# docs/security-review.md.
+_resolver_pool = concurrent.futures.ThreadPoolExecutor(max_workers=64, thread_name_prefix="resolve")
 
 
 class BlockedTargetError(Exception):
@@ -74,7 +84,14 @@ class BlockedTargetError(Exception):
 
 
 class ResolutionError(Exception):
+    """DNS resolution failed before any policy decision could be made.
+
+    ``nxdomain`` is true when the name does not exist and ``timeout`` when the resolver did not answer in
+    time, so callers can map the failure to a precise :class:`FailureCategory`.
+    """
+
     def __init__(self, message: str, *, nxdomain: bool = False, timeout: bool = False):
+        """Store the message and the ``nxdomain`` / ``timeout`` flags."""
         super().__init__(message)
         self.nxdomain = nxdomain
         self.timeout = timeout
@@ -98,6 +115,10 @@ class NetworkPolicy:
 
     @classmethod
     def from_cidrs(cls, cidrs: str | list[str] | None, allow_private_hostnames: bool = False) -> NetworkPolicy:
+        """Build a policy from a comma-separated string or list of private CIDRs to allow.
+
+        An empty value yields the default policy, which allows only globally routable addresses.
+        """
         if isinstance(cidrs, str):
             cidrs = [c.strip() for c in cidrs.split(",") if c.strip()]
         nets = tuple(ipaddress.ip_network(c, strict=False) for c in (cidrs or []))
@@ -112,6 +133,8 @@ class NetworkPolicy:
             return "multicast address"
         if ip.is_unspecified:
             return "unspecified address"
+        if any(ip in net for net in _EXTRA_BLOCKED):
+            return "reserved or non-public address"
         if ip.is_global:
             return None
         if any(ip in net for net in self.allowed_private_networks if net.version == ip.version):
@@ -125,6 +148,7 @@ class NetworkPolicy:
         return "reserved or non-public address"
 
     def check_ip(self, ip: IPAddress | str) -> None:
+        """Raise :class:`BlockedTargetError` if ``ip`` may not be contacted under this policy."""
         addr = ipaddress.ip_address(ip) if isinstance(ip, str) else ip
         reason = self.ip_block_reason(addr)
         if reason:
@@ -140,12 +164,13 @@ def _unwrap(ip: IPAddress) -> IPAddress:
             return ip.sixtofour
         if ip.teredo:
             return ip.teredo[1]
-        if ip in _NAT64:
+        if ip in _NAT64 or ip in _SIIT or (ip in _IPV4_COMPATIBLE and int(ip) > 1):
             return ipaddress.IPv4Address(int(ip) & 0xFFFFFFFF)
     return ip
 
 
 def parse_ip(host: str) -> IPAddress | None:
+    """Return ``host`` as an IP address (brackets allowed for IPv6), or ``None`` if it is a hostname."""
     try:
         return ipaddress.ip_address(host.strip("[]"))
     except ValueError:

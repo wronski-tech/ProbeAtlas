@@ -1,3 +1,5 @@
+"""Control-plane settings loaded from ``PROBEATLAS_*`` environment variables."""
+
 from __future__ import annotations
 
 from functools import lru_cache
@@ -52,6 +54,7 @@ class Settings(BaseSettings):
 
     @property
     def is_production(self) -> bool:
+        """Whether ``PROBEATLAS_ENV`` is ``production`` (enables stricter startup checks)."""
         return self.env == "production"
 
     def target_policy(self) -> NetworkPolicy:
@@ -59,6 +62,10 @@ class Settings(BaseSettings):
         return NetworkPolicy(allow_private_hostnames=self.allow_private_targets)
 
     def webhook_policy(self) -> NetworkPolicy:
+        """Outbound network policy for webhook delivery.
+
+        Private destinations are blocked unless ``PROBEATLAS_WEBHOOK_ALLOWED_PRIVATE_CIDRS`` allowlists them.
+        """
         return NetworkPolicy.from_cidrs(
             self.webhook_allowed_private_cidrs,
             allow_private_hostnames=bool(self.webhook_allowed_private_cidrs),
@@ -67,4 +74,5 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
+    """Return the process-wide settings, read once from the environment and cached."""
     return Settings()

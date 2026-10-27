@@ -1,3 +1,5 @@
+"""FastAPI application factory for the control-plane API (``probeatlas-api``)."""
+
 from __future__ import annotations
 
 import logging
@@ -68,6 +70,7 @@ def bootstrap_enrollment_token() -> None:
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    """Startup hook: warn about development-only settings and register the bootstrap enrollment token."""
     settings = get_settings()
     if settings.allow_private_targets:
         log.warning("PROBEATLAS_ALLOW_PRIVATE_TARGETS is enabled: private hostnames accepted (development only)")
@@ -76,6 +79,7 @@ async def lifespan(_app: FastAPI):
 
 
 def create_app() -> FastAPI:
+    """Build the FastAPI app with error handlers, CORS, access logging, routers, and ops endpoints."""
     settings = get_settings()
     app = FastAPI(title="ProbeAtlas API", version=__version__, description=DESCRIPTION, lifespan=lifespan)
     install_error_handlers(app)
@@ -89,6 +93,7 @@ def create_app() -> FastAPI:
 
     @app.middleware("http")
     async def access_log(request: Request, call_next):
+        """Log each request (method, path, status, duration) and add ``X-Content-Type-Options``."""
         start = time.perf_counter()
         response = await call_next(request)
         if request.url.path not in ("/healthz", "/metrics"):
@@ -104,16 +109,19 @@ def create_app() -> FastAPI:
 
     @app.get("/healthz", tags=["ops"])
     def healthz():
+        """Liveness probe: the process is up. Does not touch the database."""
         return {"status": "ok", "version": __version__}
 
     @app.get("/readyz", tags=["ops"])
     def readyz():
+        """Readiness probe: the database answers ``SELECT 1``."""
         with get_engine().connect() as conn:
             conn.execute(text("SELECT 1"))
         return {"status": "ready"}
 
     @app.get("/metrics", tags=["ops"], include_in_schema=False)
     def prom_metrics():
+        """Expose Prometheus metrics for this API process."""
         return PlainTextResponse(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
     return app
@@ -123,6 +131,7 @@ app = create_app()
 
 
 def run() -> None:
+    """Run the API with uvicorn on port 8000 using ProbeAtlas JSON logging."""
     import uvicorn
 
     setup_logging("api")

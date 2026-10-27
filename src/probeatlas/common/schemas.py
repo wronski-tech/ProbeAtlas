@@ -25,6 +25,8 @@ AGENT_PROTOCOL_VERSION = 1
 
 
 class CheckType(StrEnum):
+    """Measurement protocols an agent can execute. Values are stable wire identifiers."""
+
     HTTP = "http"
     DNS = "dns"
     TCP = "tcp"
@@ -32,6 +34,12 @@ class CheckType(StrEnum):
 
 
 class FailureCategory(StrEnum):
+    """Stable, machine-readable reason a measurement failed.
+
+    Categories are part of the public API (dashboards, alert rules, and the ``failure_category`` filter rely
+    on them). Add new values; never rename existing ones.
+    """
+
     DNS_ERROR = "dns_error"
     DNS_NXDOMAIN = "dns_nxdomain"
     DNS_NO_ANSWER = "dns_no_answer"
@@ -51,6 +59,7 @@ class FailureCategory(StrEnum):
 
 
 def utcnow() -> datetime:
+    """Return the current time as a timezone-aware UTC ``datetime``."""
     return datetime.now(UTC)
 
 
@@ -106,6 +115,7 @@ class MeasurementResult(BaseModel):
     @field_validator("measured_at")
     @classmethod
     def _require_tz(cls, value: datetime) -> datetime:
+        """Reject naive timestamps and normalize ``measured_at`` to UTC."""
         if value.tzinfo is None:
             raise ValueError("measured_at must be timezone-aware")
         return value.astimezone(UTC)
@@ -113,12 +123,19 @@ class MeasurementResult(BaseModel):
     @field_validator("details")
     @classmethod
     def _bounded_details(cls, value: dict[str, Any]) -> dict[str, Any]:
+        """Cap the size of the free-form ``details`` object at roughly 8 KB."""
         if len(repr(value)) > 8_000:
             raise ValueError("details too large")
         return value
 
 
 class AgentRegistration(BaseModel):
+    """Payload an agent sends once to ``POST /agent/v1/register`` with its enrollment token.
+
+    Location fields (``region``, ``country_code``, ``city``, ``provider``) are operator-configured labels;
+    the control plane does not verify or infer them.
+    """
+
     name: str = Field(min_length=1, max_length=100)
     region: str = Field(pattern=r"^[a-z0-9][a-z0-9-]{1,40}$")
     country_code: str | None = Field(default=None, pattern=r"^[A-Z]{2}$")
@@ -129,6 +146,8 @@ class AgentRegistration(BaseModel):
 
 
 class AgentHeartbeat(BaseModel):
+    """Periodic liveness report sent to ``POST /agent/v1/heartbeat``."""
+
     version: str = Field(max_length=40)
     capabilities: list[CheckType]
     running_jobs: int = Field(default=0, ge=0)
@@ -136,18 +155,31 @@ class AgentHeartbeat(BaseModel):
 
 
 class ClaimRequest(BaseModel):
+    """Body of ``POST /agent/v1/jobs/claim``: how many jobs the agent can run right now."""
+
     max_jobs: int = Field(default=10, ge=1, le=100)
 
 
 class ClaimResponse(BaseModel):
+    """Jobs leased to the agent. Each must be executed and reported before its lease expires."""
+
     jobs: list[JobSpec]
 
 
 class ResultBatch(BaseModel):
+    """Body of ``POST /agent/v1/results``: up to 200 measurement results."""
+
     results: list[MeasurementResult] = Field(max_length=200)
 
 
 class ResultAck(BaseModel):
+    """Per-result outcome of a submission.
+
+    ``accepted`` means stored, ``duplicate`` means the result or job was already recorded (safe to drop), and
+    ``rejected`` means it will never be accepted (for example a job leased to another agent); ``reason``
+    explains why.
+    """
+
     job_id: UUID
     result_id: UUID
     status: Literal["accepted", "duplicate", "rejected"]
@@ -155,4 +187,6 @@ class ResultAck(BaseModel):
 
 
 class ResultBatchResponse(BaseModel):
+    """Acknowledgements for a :class:`ResultBatch`, one per submitted result."""
+
     acks: list[ResultAck]

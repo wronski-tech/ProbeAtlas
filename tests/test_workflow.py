@@ -20,6 +20,7 @@ from tests.conftest import BOOTSTRAP_TOKEN, TargetServer, force_due, run_schedul
 
 
 def make_agent(client, tmp_path, region="test-a") -> Agent:
+    """Create and enroll a real :class:`Agent` whose HTTP traffic goes to the test app."""
     cfg = AgentConfig(
         api_url="http://testserver", enrollment_token=BOOTSTRAP_TOKEN, name=f"e2e-{region}", region=region,
         country_code="PL", city="Warsaw", provider="local-dev", state_file=str(tmp_path / f"{region}.json"),
@@ -34,6 +35,7 @@ def make_agent(client, tmp_path, region="test-a") -> Agent:
 
 
 def run_round(agent: Agent, monitor_id: str) -> None:
+    """Schedule the monitor, let the agent claim and run the check, and flush its result."""
     force_due(monitor_id)
     run_scheduler()
     assert agent.step() >= 1
@@ -104,6 +106,7 @@ def test_agent_buffers_results_while_control_plane_is_unreachable(client, accoun
     real_submit = agent.client.submit
 
     def unreachable(_results):
+        """Simulate a control-plane outage on result submission."""
         raise TransientError("connection refused")
 
     agent.client.submit = unreachable

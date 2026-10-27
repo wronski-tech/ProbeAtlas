@@ -16,11 +16,17 @@ from .errors import APIError
 
 
 def _invalid(field: str, msg: str) -> APIError:
+    """Build a 422 validation error that points at ``field`` in the request body."""
     return APIError(422, "validation_error", "request validation failed",
                     [{"loc": ["body", field], "msg": msg, "type": "value_error"}])
 
 
 def normalize_target(check_type: CheckType, target: str, settings: dict[str, Any], policy: NetworkPolicy) -> str:
+    """Validate and normalize a monitor target for ``check_type``, or raise a 422 :class:`APIError`.
+
+    HTTP targets must be http(s) URLs; DNS, TCP, and ICMP targets must be hostnames or IP literals. Blocked
+    destinations (private, loopback, metadata, internal names) are rejected unless the policy allows them.
+    """
     try:
         if check_type == CheckType.HTTP:
             return validate_http_url(target, policy)

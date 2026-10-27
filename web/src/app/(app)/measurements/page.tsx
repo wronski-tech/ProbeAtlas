@@ -7,6 +7,7 @@ import type { Agent, Location, Measurement, Monitor, Page } from "@/lib/types";
 import { Button, Card, ErrorBanner, PageHeader, RangePicker, Select } from "@/components/ui";
 import { MeasurementsTable } from "@/components/tables";
 
+/** Raw measurement history with monitor, region, agent, type, outcome, and time filters. */
 export default function MeasurementsPage() {
   const [range, setRange] = useState<TimeRangeKey>("24h");
   const [filters, setFilters] = useState({ monitor_id: "", region: "", agent_id: "", check_type: "", success: "" });
@@ -20,6 +21,7 @@ export default function MeasurementsPage() {
   const monitorMap = useMemo(() => Object.fromEntries((monitors?.items ?? []).map((m) => [m.id, m])), [monitors]);
   const agentMap = useMemo(() => Object.fromEntries((agents ?? []).map((a) => [a.id, a.name])), [agents]);
 
+  /** Load the first page (`next` = null) or append the page after cursor `next`. */
   async function load(next: string | null) {
     setLoading(true);
     setError(null);

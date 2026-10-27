@@ -10,6 +10,7 @@ import { MeasurementsTable, RegionTable } from "@/components/tables";
 
 const WINDOWS = [1, 24, 168];
 
+/** Main dashboard: monitor states, failing monitors, incidents, availability, latency, agents, regions. */
 export default function Dashboard() {
   const [hours, setHours] = useState(24);
   const { data, error } = useApi<Overview>(`/v1/overview${query({ window_hours: hours })}`, 10_000);

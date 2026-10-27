@@ -30,6 +30,7 @@ CHECKS: dict[CheckType, CheckFn] = {
 
 
 def detect_capabilities() -> list[CheckType]:
+    """Return the check types this host can run. ICMP is included only if ping sockets work."""
     caps = [CheckType.HTTP, CheckType.DNS, CheckType.TCP]
     if icmp_supported():
         caps.append(CheckType.ICMP)

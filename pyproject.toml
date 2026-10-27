@@ -49,7 +49,7 @@ target-version = "py311"
 src = ["src", "tests"]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "B", "UP", "S", "N"]
+select = ["E", "F", "I", "B", "UP", "S", "N", "D"]
 ignore = [
   "B008",  # FastAPI Depends() in defaults is idiomatic
   "S101",  # asserts are fine in tests
@@ -58,6 +58,11 @@ ignore = [
   "S608",  # no string-built SQL; false positives on f-strings
 ]
 
+[tool.ruff.lint.pydocstyle]
+# Every module, class, and function has a docstring; scripts/check_docstrings.py also covers private
+# and nested definitions, which pydocstyle skips.
+convention = "google"
+
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S", "N802"]
+"tests/**" = ["S", "N802", "D103"]  # test_* names describe the behavior
 "src/probeatlas/server/migrations/**" = ["N", "E501"]

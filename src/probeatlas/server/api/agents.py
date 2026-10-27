@@ -98,10 +98,15 @@ def register(body: AgentRegistration, request: Request, authorization: str | Non
 @protocol.post("/heartbeat")
 def heartbeat(body: AgentHeartbeat, request: Request, agent: Agent = Depends(get_agent),
               db: Session = Depends(get_db)):
+    """Record an agent heartbeat and refresh its version, capabilities, and status.
+
+    An agent marked offline becomes ``online`` again on its next heartbeat. Disabled agents are rejected.
+    """
     limiter.hit(f"agent:{agent.id}:hb", 60)
     now = datetime.now(UTC)
     db.execute(
-        update(Agent).where(Agent.id == agent.id).values(
+        # The status guard keeps a heartbeat racing `disable-agent` from re-enabling the agent.
+        update(Agent).where(Agent.id == agent.id, Agent.status != "disabled").values(
             last_heartbeat_at=now, status="online", version=body.version,
             capabilities=[c.value for c in body.capabilities], last_seen_ip=client_ip(request),
         )
@@ -113,11 +118,20 @@ def heartbeat(body: AgentHeartbeat, request: Request, agent: Agent = Depends(get
 
 @protocol.post("/jobs/claim", response_model=ClaimResponse)
 def claim(body: ClaimRequest, agent: Agent = Depends(get_agent), db: Session = Depends(get_db)):
+    """Lease up to ``max_jobs`` due jobs in the agent's region that it is able to run.
+
+    Each job must be reported before its ``lease_expires_at``; otherwise it may be retried by another agent.
+    """
     limiter.hit(f"agent:{agent.id}:claim", 600)
     return ClaimResponse(jobs=claim_jobs(db, agent, body.max_jobs))
 
 
 @protocol.post("/results", response_model=ResultBatchResponse)
 def submit_results(body: ResultBatch, agent: Agent = Depends(get_agent), db: Session = Depends(get_db)):
+    """Submit measurement results for leased jobs.
+
+    Each result is acknowledged as ``accepted``, ``duplicate`` (already stored; safe to drop), or
+    ``rejected`` with a reason. Tenant and target are taken from the job, never from the payload.
+    """
     limiter.hit(f"agent:{agent.id}:results", 600)
     return ResultBatchResponse(acks=ingest_results(db, agent, body.results))

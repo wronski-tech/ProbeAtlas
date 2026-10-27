@@ -23,6 +23,7 @@ const PLACEHOLDER: Record<CheckType, string> = {
   icmp: "example.com",
 };
 
+/** Create or edit a monitor. Type-specific settings fields change with the selected check type. */
 export function MonitorForm({ initial, editing, onSubmit, submitLabel, extra }: {
   initial?: Monitor;
   editing?: boolean;
@@ -37,6 +38,7 @@ export function MonitorForm({ initial, editing, onSubmit, submitLabel, extra }: 
   const [busy, setBusy] = useState(false);
   const s = initial?.settings ?? {};
 
+  /** Build the request body from the form and submit it; validation errors are shown inline. */
   async function submit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const f = new FormData(e.currentTarget);

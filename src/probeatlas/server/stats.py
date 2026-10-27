@@ -39,10 +39,12 @@ def agg_columns(latency_filter: str = "success") -> str:
 
 
 def _r(v: float | None) -> float | None:
+    """Round to 2 decimals, preserving ``None``."""
     return None if v is None else round(float(v), 2)
 
 
 def latency_stats(row) -> LatencyStats:
+    """Build latency statistics from an aggregate row, nulling percentiles without enough samples."""
     n = row.n_lat or 0
     return LatencyStats(
         sample_count=n,
@@ -55,6 +57,11 @@ def latency_stats(row) -> LatencyStats:
 
 
 def group_performance(row, key: str, region: str, missing: int, agent_id=None, agent_name=None) -> GroupPerformance:
+    """Build the performance summary for one region or agent from an aggregate row.
+
+    ``missing`` is the number of scheduled jobs that expired without a result; ``insufficient_data`` is set
+    when there are fewer than ``MIN_SAMPLES["p50"]`` latency samples.
+    """
     total = row.total or 0
     return GroupPerformance(
         key=key,
@@ -73,6 +80,8 @@ def group_performance(row, key: str, region: str, missing: int, agent_id=None, a
 
 
 class _Empty:
+    """Stand-in aggregate row for a group with no results."""
+
     total = successes = n_lat = 0
     min_ms = avg_ms = p50 = p95 = p99 = loss_avg = last_at = None
 
@@ -81,6 +90,11 @@ def regional_performance(
     db: Session, monitor_id: uuid.UUID, regions: list[str], since: datetime, until: datetime,
     region: str | None = None, agent_id: uuid.UUID | None = None,
 ) -> RegionalPerformance:
+    """Compare a monitor's performance across regions and agents for a time window.
+
+    Returns overall, per-region, and per-agent summaries, failure category counts, missing-data counts, and a
+    global/regional assessment. Configured regions without results are included with zero samples.
+    """
     params = {"mid": monitor_id, "since": since, "until": until, "region": region, "agent": agent_id}
     filt = ("monitor_id = :mid AND measured_at >= :since AND measured_at < :until"
             " AND (CAST(:region AS text) IS NULL OR region = :region)"
@@ -180,6 +194,7 @@ def assess(regions: list[GroupPerformance]) -> tuple[str, list[str]]:
 
 
 def choose_bucket(since: datetime, until: datetime, target_points: int = 60) -> int:
+    """Pick a bucket size in seconds that gives about ``target_points`` points over the window."""
     span = max((until - since).total_seconds(), 60)
     raw = span / target_points
     for b in (60, 120, 300, 600, 900, 1800, 3600, 7200, 21600, 43200, 86400):
@@ -192,6 +207,11 @@ def timeseries(
     db: Session, monitor_id: uuid.UUID, since: datetime, until: datetime, group_by: str,
     region: str | None = None, agent_id: uuid.UUID | None = None, bucket_seconds: int | None = None,
 ) -> Timeseries:
+    """Return bucketed success counts and latency statistics for a monitor.
+
+    Series are grouped by ``region``, ``agent``, or ``none``. Percentiles are null in buckets with too few
+    samples.
+    """
     bucket = bucket_seconds or choose_bucket(since, until)
     key = {"region": "region", "agent": "CAST(agent_id AS text)", "none": "'all'"}[group_by]
     rows = db.execute(
@@ -240,6 +260,10 @@ def timeseries(
 
 
 def parse_window(since: datetime | None, until: datetime | None, default_hours: int = 24) -> tuple[datetime, datetime]:
+    """Resolve an optional ``since``/``until`` window to UTC, defaulting to the last ``default_hours``.
+
+    Raises 422 if the window is empty, reversed, or longer than 90 days.
+    """
     from datetime import UTC
 
     from .errors import APIError

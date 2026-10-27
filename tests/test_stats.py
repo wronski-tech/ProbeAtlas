@@ -10,6 +10,7 @@ from probeatlas.server.models import Job, Result
 
 def _insert(db, monitor: dict, workspace_id: str, agent_id: str, region: str, latencies, *, fail: int = 0,
             category="timeout", start=None, step_s=30):
+    """Insert synthetic results directly: successes with ``latencies`` then ``fail`` failures."""
     start = start or datetime.now(UTC) - timedelta(hours=1)
     rows = [(lat, True) for lat in latencies] + [(None, False)] * fail
     for i, (lat, ok) in enumerate(rows):

@@ -1,0 +1,90 @@
+# Continuous integration: lint, documentation coverage, tests against real PostgreSQL, web checks, and
+# container builds. Runs on every push and pull request; no secrets or paid services are needed.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend (lint, docs, tests, migrations)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: probeatlas
+          POSTGRES_PASSWORD: probeatlas
+          POSTGRES_DB: probeatlas
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U probeatlas" --health-interval 2s --health-timeout 3s --health-retries 30
+    env:
+      PROBEATLAS_TEST_DATABASE_URL: postgresql+psycopg://probeatlas:probeatlas@localhost:5432/probeatlas_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install
+        run: uv venv .venv && uv pip install -p .venv -e ".[server,agent,cli,dev]"
+      - name: Allow unprivileged ICMP sockets (ICMP check tests)
+        run: sudo sysctl -w net.ipv4.ping_group_range="0 2147483647"
+      - name: Ruff (lint + pydocstyle)
+        run: .venv/bin/ruff check src tests scripts
+      - name: Every module, class, and function is documented (Python and TypeScript)
+        run: .venv/bin/python scripts/check_docstrings.py src tests web/src
+      - name: Tests
+        run: .venv/bin/pytest
+      - name: Migrations match the models
+        env:
+          PROBEATLAS_DATABASE_URL: ${{ env.PROBEATLAS_TEST_DATABASE_URL }}
+        run: .venv/bin/probeatlas-admin migrate && .venv/bin/alembic check
+      - name: Published OpenAPI document is up to date
+        run: |
+          .venv/bin/python -c "import json; from probeatlas.server.main import app; print(json.dumps(app.openapi(), indent=2))" > /tmp/openapi.json
+          diff -u docs/openapi.json /tmp/openapi.json || { echo "::error::docs/openapi.json is stale; run 'make openapi'"; exit 1; }
+
+  web:
+    name: Web (typecheck, tests, build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+  images:
+    name: Container images build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -f deploy/Dockerfile.server -t probeatlas-server:ci .
+      - run: docker build -f deploy/Dockerfile.agent -t probeatlas-agent:ci .
+      - run: docker build -t probeatlas-web:ci web
+      - name: Agent image runs as non-root and starts
+        run: |
+          test "$(docker run --rm --entrypoint id probeatlas-agent:ci -u)" != "0"
+          docker run --rm --entrypoint probeatlas-agent probeatlas-agent:ci 2>&1 | grep -q "PROBEATLAS_AGENT_REGION is required"

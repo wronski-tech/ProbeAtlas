@@ -23,6 +23,7 @@ PREFIX_WEBHOOK_SECRET = "pah"
 
 
 def hash_password(password: str) -> str:
+    """Hash ``password`` with scrypt and a random salt; returns a self-describing encoded string."""
     salt = secrets.token_bytes(16)
     digest = hashlib.scrypt(password.encode(), salt=salt, n=_SCRYPT_N, r=_SCRYPT_R, p=_SCRYPT_P, dklen=32)
     salt_b64, digest_b64 = base64.b64encode(salt).decode(), base64.b64encode(digest).decode()
@@ -30,6 +31,7 @@ def hash_password(password: str) -> str:
 
 
 def verify_password(password: str, encoded: str) -> bool:
+    """Check ``password`` against an encoded scrypt hash in constant time."""
     try:
         algo, n, r, p, salt_b64, digest_b64 = encoded.split("$")
     except ValueError:
@@ -47,6 +49,7 @@ DUMMY_PASSWORD_HASH = hash_password(secrets.token_urlsafe(16))
 
 
 def new_token(prefix: str) -> str:
+    """Return a new 256-bit random token with a type ``prefix`` such as ``pas`` or ``paa``."""
     return f"{prefix}_{secrets.token_urlsafe(32)}"
 
 
@@ -57,4 +60,5 @@ def new_api_key() -> tuple[str, str]:
 
 
 def token_hash(token: str) -> str:
+    """Return the SHA-256 hex digest under which a token is stored and looked up."""
     return hashlib.sha256(token.encode()).hexdigest()

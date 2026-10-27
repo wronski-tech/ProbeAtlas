@@ -20,8 +20,8 @@ in two layers:
    redirects, and only to `http`/`https`.
 
 Blocked: loopback, RFC 1918 private, link-local, CGNAT (100.64/10), multicast,
-unspecified, reserved, and IPv6 equivalents including IPv4-mapped, 6to4,
-Teredo, and NAT64 forms. Cloud metadata addresses (169.254.169.254, 169.254.170.2,
+unspecified, reserved, and IPv6 equivalents including IPv4-mapped, IPv4-compatible,
+SIIT, 6to4, Teredo, NAT64 (well-known and local-use) forms, and site-local `fec0::/10`. Cloud metadata addresses (169.254.169.254, 169.254.170.2,
 100.100.100.200, fd00:ec2::254, …) are blocked **even if** an operator
 allowlists their range.
 
@@ -40,6 +40,10 @@ switches exist:
   ranges at connection time. The compose file allows only the isolated demo
   network `10.203.10.0/24`; the database and API remain unreachable.
 
+Every HTTP request (checks and webhooks) has a hard overall deadline: a watchdog
+closes the connection when the timeout expires, so a server that answers one byte
+at a time cannot hold an agent or worker thread past the check timeout.
+
 Other limits: fixed check types with validated settings (no commands, scripts,
 custom headers, or request bodies); timeouts capped at 30 s; response bodies
 read at most 64 KiB and never stored; minimum interval per workspace (default
@@ -56,9 +60,11 @@ read at most 64 KiB and never stored; minimum interval per workspace (default
   (rotation revokes the old key immediately). Only workspace owners using a
   session can create, rotate, or revoke keys, so a leaked key cannot mint more keys.
 * The dashboard keeps the session token in an httpOnly, SameSite=Lax cookie and
-  calls the API through a same-origin proxy. Mutating proxy requests require the
+  calls the API through a same-origin proxy. Every mutating web route (the proxy,
+  sign-in/registration, sign-out, workspace switching) requires the
   `x-probeatlas-csrf: 1` header, which a cross-site page cannot set without a
-  CORS preflight that the proxy never allows.
+  CORS preflight that is never allowed. The proxy forwards only `/v1` paths made of
+  plain URL-safe segments, so encoded traversal cannot reach other API routes.
 
 ## Tenant isolation
 
@@ -86,7 +92,9 @@ sockets (sysctl `net.ipv4.ping_group_range`), so `CAP_NET_RAW` is not needed.
 ## Logging, audit, and secrets
 
 * Structured JSON logs; a redaction filter removes bearer tokens and ProbeAtlas
-  secret formats. Request logs contain method, path, status, and duration only.
+  secret formats from messages, tracebacks, and structured fields. SQL errors
+  never include bound parameters (`hide_parameters=True`). Request logs contain
+  method, path, status, and duration only.
 * `audit_events` records registration, logins and failed logins, API key
   creation, rotation, and revocation, member changes, monitor and alert rule
   changes, webhook changes, and agent enrollment, rejection, and disabling.
@@ -97,6 +105,13 @@ sockets (sysctl `net.ipv4.ping_group_range`), so `CAP_NET_RAW` is not needed.
 
 Token buckets: per workspace for `/v1` (default 300/min), per client IP for
 login and registration (20/min) and agent enrollment (10/min), and per agent
-for the agent protocol. Limits are per API process; behind the web proxy, the
-auth limit applies to the web server's address unless the API is configured to
-trust forwarded headers (`FORWARDED_ALLOW_IPS` for uvicorn).
+for the agent protocol. Limits are per API process.
+
+**Known limitation:** the web server does not forward the browser's IP yet, so
+all dashboard sign-ins share the web server's auth bucket (and audit events from
+the dashboard record the web server's IP). Direct API clients are limited by
+their own IP when `FORWARDED_ALLOW_IPS` is set to the load balancer. See
+finding M1 in [security-review.md](security-review.md).
+
+Known findings, the threat model, and the penetration test scope are tracked in
+[security-review.md](security-review.md).

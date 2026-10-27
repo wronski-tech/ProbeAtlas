@@ -15,10 +15,12 @@ const NAV = [
   { href: "/settings", label: "Settings" },
 ];
 
+/** Navigation sidebar with workspace switcher and sign-out. */
 export function Sidebar({ user, workspaces, current }: { user: { name: string; email: string }; workspaces: Ws[]; current: Ws }) {
   const path = usePathname();
   const router = useRouter();
 
+  /** Switch the active workspace (the server verifies membership) and open its dashboard. */
   async function switchWorkspace(id: string) {
     await fetch("/api/session/workspace", {
       method: "POST",
@@ -29,8 +31,9 @@ export function Sidebar({ user, workspaces, current }: { user: { name: string; e
     router.refresh();
   }
 
+  /** Sign out and return to the login page. */
   async function logout() {
-    await fetch("/api/session", { method: "DELETE" });
+    await fetch("/api/session", { method: "DELETE", headers: { "x-probeatlas-csrf": "1" } });
     router.push("/login");
     router.refresh();
   }

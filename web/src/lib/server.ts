@@ -7,6 +7,7 @@ export const WORKSPACE_COOKIE = "pa_workspace";
 export type Workspace = { id: string; name: string; role: string | null };
 export type Me = { user: { id: string; email: string; name: string }; workspaces: Workspace[] };
 
+/** Cookie settings for the session and workspace cookies: httpOnly, SameSite=Lax, Secure in production. */
 export const cookieOptions = {
   httpOnly: true,
   sameSite: "lax" as const,

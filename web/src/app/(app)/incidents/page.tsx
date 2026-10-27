@@ -7,6 +7,7 @@ import { formatDateTime, query, relativeTime } from "@/lib/format";
 import type { Incident, IncidentEvent, Monitor, Page } from "@/lib/types";
 import { Badge, Button, Card, Empty, ErrorBanner, PageHeader, Select } from "@/components/ui";
 
+/** Incident history with status filter; expand an incident to see its timeline. */
 export default function IncidentsPage() {
   const [status, setStatus] = useState("");
   const { data, error } = useApi<Page<Incident>>(`/v1/incidents${query({ status, limit: 100 })}`, 10_000);
@@ -14,6 +15,7 @@ export default function IncidentsPage() {
   const names = useMemo(() => Object.fromEntries((monitors?.items ?? []).map((m) => [m.id, m.name])), [monitors]);
   const [open, setOpen] = useState<Record<string, IncidentEvent[]>>({});
 
+  /** Expand or collapse an incident, loading its timeline on first expand. */
   async function toggle(id: string) {
     if (open[id]) {
       const { [id]: _drop, ...rest } = open;

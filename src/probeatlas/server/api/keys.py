@@ -21,6 +21,7 @@ router = APIRouter(prefix="/v1/api-keys", tags=["api keys"])
 
 
 def _issue(db: Session, p: Principal, name: str, expires_at: datetime | None) -> ApiKeyIssued:
+    """Create a key row and return it together with the secret (caller audits and commits)."""
     prefix, key = new_api_key()
     row = ApiKey(workspace_id=p.workspace_id, name=name, prefix=prefix, key_hash=token_hash(key),
                  created_by=p.user_id, expires_at=expires_at)
@@ -32,6 +33,7 @@ def _issue(db: Session, p: Principal, name: str, expires_at: datetime | None) ->
 
 @router.get("", response_model=list[ApiKeyOut])
 def list_keys(p: Principal = Depends(require_owner), db: Session = Depends(get_db)):
+    """List the workspace's API keys, newest first. Secrets are never returned."""
     return db.execute(
         select(ApiKey).where(ApiKey.workspace_id == p.workspace_id).order_by(ApiKey.created_at.desc())
     ).scalars().all()
@@ -39,6 +41,7 @@ def list_keys(p: Principal = Depends(require_owner), db: Session = Depends(get_d
 
 @router.post("", response_model=ApiKeyIssued, status_code=201)
 def create_key(body: ApiKeyCreate, p: Principal = Depends(require_owner), db: Session = Depends(get_db)):
+    """Create an API key (owner session only). The secret is returned once in ``key``."""
     active = db.execute(select(ApiKey.id).where(ApiKey.workspace_id == p.workspace_id,
                                                 ApiKey.revoked_at.is_(None))).all()
     if len(active) >= 50:
@@ -53,6 +56,7 @@ def create_key(body: ApiKeyCreate, p: Principal = Depends(require_owner), db: Se
 
 @router.delete("/{key_id}", status_code=204)
 def revoke_key(key_id: uuid.UUID, p: Principal = Depends(require_owner), db: Session = Depends(get_db)):
+    """Revoke an API key immediately. Revoking an already revoked key is a no-op."""
     key = tenant_get(db, ApiKey, key_id, p, "API key")
     if key.revoked_at is None:
         key.revoked_at = datetime.now(UTC)

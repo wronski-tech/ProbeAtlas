@@ -33,6 +33,7 @@ router = APIRouter(prefix="/v1", tags=["auth & workspaces"])
 
 
 def _workspaces(db: Session, user_id: uuid.UUID) -> list[WorkspaceOut]:
+    """Return the workspaces ``user_id`` belongs to, with their role in each."""
     rows = db.execute(
         select(Workspace, Membership.role)
         .join(Membership, Membership.workspace_id == Workspace.id)
@@ -43,6 +44,7 @@ def _workspaces(db: Session, user_id: uuid.UUID) -> list[WorkspaceOut]:
 
 
 def _new_workspace(db: Session, settings: Settings, name: str, owner: User) -> Workspace:
+    """Create a workspace with default limits and make ``owner`` its owner (caller commits)."""
     ws = Workspace(name=name, max_monitors=settings.default_max_monitors,
                    min_interval_seconds=settings.min_interval_seconds)
     db.add(ws)
@@ -52,6 +54,7 @@ def _new_workspace(db: Session, settings: Settings, name: str, owner: User) -> W
 
 
 def _issue_session(db: Session, settings: Settings, user: User) -> SessionOut:
+    """Create a session for ``user``, record the login time, and commit."""
     token = new_token(PREFIX_SESSION)
     expires = datetime.now(UTC) + timedelta(hours=settings.session_ttl_hours)
     db.add(UserSession(user_id=user.id, token_hash=token_hash(token), expires_at=expires))
@@ -64,6 +67,10 @@ def _issue_session(db: Session, settings: Settings, user: User) -> SessionOut:
 @router.post("/auth/register", response_model=SessionOut, status_code=201)
 def register(body: RegisterRequest, request: Request, db: Session = Depends(get_db),
              settings: Settings = Depends(get_settings)):
+    """Create an account and a first workspace, and return a session.
+
+    Rate limited per client IP. Returns 403 when registration is disabled and 409 if the email is taken.
+    """
     limiter.hit(f"auth:{client_ip(request)}", settings.auth_rate_limit_per_minute)
     if not settings.allow_registration:
         raise APIError(403, "registration_disabled", "self-service registration is disabled")
@@ -82,6 +89,11 @@ def register(body: RegisterRequest, request: Request, db: Session = Depends(get_
 @router.post("/auth/login", response_model=SessionOut)
 def login(body: LoginRequest, request: Request, db: Session = Depends(get_db),
           settings: Settings = Depends(get_settings)):
+    """Exchange email and password for a session token.
+
+    Rate limited per client IP. Unknown emails and wrong passwords get the same 401 response and the same
+    hashing cost, so the endpoint does not reveal which accounts exist.
+    """
     ip = client_ip(request)
     limiter.hit(f"auth:{ip}", settings.auth_rate_limit_per_minute)
     user = db.execute(select(User).where(User.email == body.email.lower())).scalar_one_or_none()
@@ -98,6 +110,7 @@ def login(body: LoginRequest, request: Request, db: Session = Depends(get_db),
 @router.post("/auth/logout", status_code=204)
 def logout(authorization: str | None = Header(default=None), user: User = Depends(get_current_user),
            db: Session = Depends(get_db)):
+    """Revoke the current session token."""
     token = (authorization or "").split(" ", 1)[-1]
     sess = db.execute(select(UserSession).where(UserSession.token_hash == token_hash(token))).scalar_one_or_none()
     if sess:
@@ -107,17 +120,20 @@ def logout(authorization: str | None = Header(default=None), user: User = Depend
 
 @router.get("/auth/me", response_model=MeOut)
 def me(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Return the signed-in user and their workspaces (session tokens only)."""
     return MeOut(user=UserOut.model_validate(user), workspaces=_workspaces(db, user.id))
 
 
 @router.get("/workspaces", response_model=list[WorkspaceOut])
 def list_workspaces(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """List the workspaces the signed-in user belongs to (session tokens only)."""
     return _workspaces(db, user.id)
 
 
 @router.post("/workspaces", response_model=WorkspaceOut, status_code=201)
 def create_workspace(body: WorkspaceCreate, request: Request, user: User = Depends(get_current_user),
                      db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
+    """Create a workspace owned by the signed-in user (at most 10 owned workspaces)."""
     count = db.execute(select(func.count()).select_from(Membership).where(Membership.user_id == user.id,
                                                                           Membership.role == "owner")).scalar_one()
     if count >= 10:
@@ -131,6 +147,7 @@ def create_workspace(body: WorkspaceCreate, request: Request, user: User = Depen
 
 @router.get("/members", response_model=list[MemberOut])
 def list_members(p: Principal = Depends(get_principal), db: Session = Depends(get_db)):
+    """List the members of the current workspace and their roles."""
     rows = db.execute(
         select(Membership, User).join(User, User.id == Membership.user_id)
         .where(Membership.workspace_id == p.workspace_id).order_by(Membership.created_at)
@@ -141,6 +158,7 @@ def list_members(p: Principal = Depends(get_principal), db: Session = Depends(ge
 
 @router.post("/members", response_model=MemberOut, status_code=201)
 def add_member(body: MemberAdd, p: Principal = Depends(require_owner), db: Session = Depends(get_db)):
+    """Add a registered user to the workspace by email (owner only)."""
     user = db.execute(select(User).where(User.email == body.email.lower())).scalar_one_or_none()
     if user is None:
         raise APIError(404, "user_not_found", "no user with this email; ask them to register first")
@@ -156,6 +174,7 @@ def add_member(body: MemberAdd, p: Principal = Depends(require_owner), db: Sessi
 
 @router.delete("/members/{user_id}", status_code=204)
 def remove_member(user_id: uuid.UUID, p: Principal = Depends(require_owner), db: Session = Depends(get_db)):
+    """Remove a member from the workspace (owner only). The last owner cannot be removed."""
     m = db.get(Membership, (p.workspace_id, user_id))
     if m is None:
         raise not_found("member")

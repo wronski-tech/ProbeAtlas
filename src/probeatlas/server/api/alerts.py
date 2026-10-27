@@ -40,8 +40,12 @@ from ..security import PREFIX_WEBHOOK_SECRET, new_token
 
 router = APIRouter(prefix="/v1", tags=["alerting"])
 
+# Every incident fans out to all channels, so this also bounds webhook traffic per incident.
+MAX_CHANNELS_PER_WORKSPACE = 10
+
 
 def _rule_out(db: Session, rule: AlertRule) -> AlertRuleOut:
+    """Build the response for ``rule``, including the regions where it is currently firing."""
     firing = db.execute(
         select(AlertState.region).where(AlertState.rule_id == rule.id, AlertState.firing.is_(True))
     ).scalars().all()
@@ -51,6 +55,7 @@ def _rule_out(db: Session, rule: AlertRule) -> AlertRuleOut:
 @router.get("/alert-rules", response_model=list[AlertRuleOut], tags=["alerting"])
 def list_rules(monitor_id: uuid.UUID | None = None, p: Principal = Depends(get_principal),
                db: Session = Depends(get_db)):
+    """List the workspace's alert rules, optionally for one monitor."""
     q = select(AlertRule).where(AlertRule.workspace_id == p.workspace_id)
     if monitor_id:
         q = q.where(AlertRule.monitor_id == monitor_id)
@@ -59,6 +64,11 @@ def list_rules(monitor_id: uuid.UUID | None = None, p: Principal = Depends(get_p
 
 @router.post("/alert-rules", response_model=AlertRuleOut, status_code=201)
 def create_rule(body: AlertRuleCreate, p: Principal = Depends(get_principal), db: Session = Depends(get_db)):
+    """Create an alert rule for a monitor.
+
+    ``http_status`` rules apply only to HTTP monitors and ``packet_loss`` rules only to ICMP monitors. A
+    monitor can have at most 20 rules.
+    """
     monitor = tenant_get(db, Monitor, body.monitor_id, p, "monitor")
     if body.kind == "http_status" and monitor.check_type != "http":
         raise APIError(422, "validation_error", "http_status rules only apply to http monitors")
@@ -79,12 +89,14 @@ def create_rule(body: AlertRuleCreate, p: Principal = Depends(get_principal), db
 
 @router.get("/alert-rules/{rule_id}", response_model=AlertRuleOut)
 def get_rule(rule_id: uuid.UUID, p: Principal = Depends(get_principal), db: Session = Depends(get_db)):
+    """Get one alert rule and the regions where it is firing."""
     return _rule_out(db, tenant_get(db, AlertRule, rule_id, p, "alert rule"))
 
 
 @router.patch("/alert-rules/{rule_id}", response_model=AlertRuleOut)
 def update_rule(rule_id: uuid.UUID, body: AlertRuleUpdate, p: Principal = Depends(get_principal),
                 db: Session = Depends(get_db)):
+    """Update an alert rule's threshold, hysteresis, minimum regions, or enabled flag."""
     rule = tenant_get(db, AlertRule, rule_id, p, "alert rule")
     for k, v in body.model_dump(exclude_unset=True).items():
         if v is not None:
@@ -100,6 +112,7 @@ def update_rule(rule_id: uuid.UUID, body: AlertRuleUpdate, p: Principal = Depend
 
 @router.delete("/alert-rules/{rule_id}", status_code=204)
 def delete_rule(rule_id: uuid.UUID, p: Principal = Depends(get_principal), db: Session = Depends(get_db)):
+    """Delete an alert rule together with its incidents and streak state."""
     rule = tenant_get(db, AlertRule, rule_id, p, "alert rule")
     audit(db, "alert_rule.deleted", workspace_id=p.workspace_id, actor_type=p.actor_type, actor_id=p.actor_id,
           target_type="alert_rule", target_id=rule.id, ip=p.ip)
@@ -116,6 +129,7 @@ def list_incidents(
     p: Principal = Depends(get_principal),
     db: Session = Depends(get_db),
 ):
+    """List incidents, newest first, optionally filtered by status and monitor. Cursor-paginated."""
     q = select(Incident).where(Incident.workspace_id == p.workspace_id)
     if status:
         q = q.where(Incident.status == status)
@@ -132,6 +146,7 @@ def list_incidents(
 
 @router.get("/incidents/{incident_id}", response_model=IncidentDetail)
 def get_incident(incident_id: uuid.UUID, p: Principal = Depends(get_principal), db: Session = Depends(get_db)):
+    """Get an incident with its full event timeline."""
     inc = tenant_get(db, Incident, incident_id, p, "incident")
     events = db.execute(
         select(IncidentEvent).where(IncidentEvent.incident_id == inc.id).order_by(IncidentEvent.created_at)
@@ -144,6 +159,7 @@ def get_incident(incident_id: uuid.UUID, p: Principal = Depends(get_principal), 
 
 
 def _check_url(url: str, settings: Settings) -> str:
+    """Validate a webhook URL against the webhook network policy or raise a 422 on ``body.url``."""
     try:
         return validate_http_url(url, settings.webhook_policy())
     except (ValueError, BlockedTargetError) as exc:
@@ -154,6 +170,7 @@ def _check_url(url: str, settings: Settings) -> str:
 
 @router.get("/notification-channels", response_model=list[ChannelOut])
 def list_channels(p: Principal = Depends(get_principal), db: Session = Depends(get_db)):
+    """List the workspace's notification channels. Signing secrets are not included."""
     return db.execute(select(NotificationChannel).where(NotificationChannel.workspace_id == p.workspace_id)
                       .order_by(NotificationChannel.created_at)).scalars().all()
 
@@ -161,7 +178,16 @@ def list_channels(p: Principal = Depends(get_principal), db: Session = Depends(g
 @router.post("/notification-channels", response_model=ChannelIssued, status_code=201)
 def create_channel(body: ChannelCreate, p: Principal = Depends(require_owner), db: Session = Depends(get_db),
                    settings: Settings = Depends(get_settings)):
+    """Create a webhook channel (owner only). The response includes the signing secret once.
+
+    The URL must be http(s) and resolve to a public address. At most 10 channels per workspace.
+    """
     url = _check_url(body.url, settings)
+    count = db.execute(select(func.count()).select_from(NotificationChannel)
+                       .where(NotificationChannel.workspace_id == p.workspace_id)).scalar_one()
+    if count >= MAX_CHANNELS_PER_WORKSPACE:
+        raise APIError(403, "limit_exceeded",
+                       f"at most {MAX_CHANNELS_PER_WORKSPACE} notification channels per workspace")
     secret = new_token(PREFIX_WEBHOOK_SECRET)
     ch = NotificationChannel(workspace_id=p.workspace_id, kind="webhook", name=body.name, url=url,
                              signing_secret=secret, enabled=body.enabled)
@@ -176,6 +202,7 @@ def create_channel(body: ChannelCreate, p: Principal = Depends(require_owner), d
 @router.patch("/notification-channels/{channel_id}", response_model=ChannelOut)
 def update_channel(channel_id: uuid.UUID, body: ChannelUpdate, p: Principal = Depends(require_owner),
                    db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
+    """Update a channel's name, URL, or enabled flag (owner only)."""
     ch = tenant_get(db, NotificationChannel, channel_id, p, "notification channel")
     changes = body.model_dump(exclude_unset=True)
     if changes.get("url"):
@@ -192,6 +219,7 @@ def update_channel(channel_id: uuid.UUID, body: ChannelUpdate, p: Principal = De
 
 @router.delete("/notification-channels/{channel_id}", status_code=204)
 def delete_channel(channel_id: uuid.UUID, p: Principal = Depends(require_owner), db: Session = Depends(get_db)):
+    """Delete a notification channel and its pending deliveries (owner only)."""
     ch = tenant_get(db, NotificationChannel, channel_id, p, "notification channel")
     audit(db, "channel.deleted", workspace_id=p.workspace_id, actor_type=p.actor_type, actor_id=p.actor_id,
           target_type="notification_channel", target_id=ch.id, ip=p.ip)
@@ -210,5 +238,6 @@ def test_channel(channel_id: uuid.UUID, p: Principal = Depends(require_owner), d
 @router.get("/notification-deliveries", response_model=list[DeliveryOut])
 def list_deliveries(limit: int = Query(50, ge=1, le=200), p: Principal = Depends(get_principal),
                     db: Session = Depends(get_db)):
+    """List recent notification deliveries with their status and last error."""
     return db.execute(select(NotificationDelivery).where(NotificationDelivery.workspace_id == p.workspace_id)
                       .order_by(NotificationDelivery.created_at.desc()).limit(limit)).scalars().all()

@@ -10,6 +10,7 @@ import { LatencyChart } from "@/components/LatencyChart";
 import { MeasurementsTable, RegionTable } from "@/components/tables";
 import { MonitorForm } from "@/components/MonitorForm";
 
+/** Monitor detail: state, regional comparison, latency chart, measurements, events, alert rules, settings. */
 export default function MonitorDetail() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
@@ -44,6 +45,7 @@ export default function MonitorDetail() {
   if (monitor.error?.status === 404) return <ErrorBanner error="Monitor not found." />;
   if (!m) return <ErrorBanner error={monitor.error} />;
 
+  /** Run a monitor action (pause, resume, delete, save) and refresh, keeping any API error. */
   async function act(fn: () => Promise<unknown>) {
     setActionError(null);
     try {
@@ -195,11 +197,13 @@ export default function MonitorDetail() {
   );
 }
 
+/** List, create, enable/disable, and delete the monitor's alert rules. */
 function AlertRules({ monitor, rules, onChange }: { monitor: Monitor; rules: AlertRule[]; onChange: () => void }) {
   const [error, setError] = useState<ApiError | null>(null);
   const [kind, setKind] = useState("unavailable");
   const kinds = ["unavailable", ...(monitor.type === "http" ? ["http_status"] : []), "latency", ...(monitor.type === "icmp" ? ["packet_loss"] : [])];
 
+  /** Create an alert rule from the form. */
   async function create(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const form = e.currentTarget;

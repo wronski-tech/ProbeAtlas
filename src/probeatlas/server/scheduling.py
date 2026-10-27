@@ -31,10 +31,17 @@ log = logging.getLogger("probeatlas.scheduler")
 
 
 def utcnow() -> datetime:
+    """Return the current UTC time."""
     return datetime.now(UTC)
 
 
 def schedule_due(db: Session, now: datetime | None = None, batch: int = 500) -> int:
+    """Create jobs for every unpaused monitor whose ``next_run_at`` has passed.
+
+    One job is created per selected region. If the scheduler is more than one interval behind, missed slots
+    are skipped rather than replayed. Safe to run concurrently and after restarts. Returns the number of jobs
+    created.
+    """
     now = now or utcnow()
     monitors = (
         db.execute(
@@ -95,6 +102,11 @@ def schedule_due(db: Session, now: datetime | None = None, batch: int = 500) -> 
 
 
 def claim_jobs(db: Session, agent: Agent, max_jobs: int, now: datetime | None = None) -> list[JobSpec]:
+    """Lease up to ``max_jobs`` pending jobs to ``agent``.
+
+    Only jobs in the agent's region, of a check type it supports, that are due and not expired are eligible.
+    The lease lasts the job timeout plus ``job_lease_grace_seconds``.
+    """
     now = now or utcnow()
     grace = get_settings().job_lease_grace_seconds
     jobs = (
@@ -140,6 +152,12 @@ def claim_jobs(db: Session, agent: Agent, max_jobs: int, now: datetime | None = 
 
 
 def reap_jobs(db: Session, now: datetime | None = None) -> dict[str, int]:
+    """Recover jobs whose lease expired and expire jobs that can no longer run.
+
+    Expired leases go back to ``pending`` while attempts remain and the job is still valid; otherwise they
+    become ``expired`` with reason ``lease_timeout`` (a late result may still be accepted). Pending jobs
+    past ``expires_at`` become ``expired`` with reason ``unclaimed``, which the API reports as missing data.
+    """
     now = now or utcnow()
     max_attempts = get_settings().job_max_attempts
     lease_expired = and_(Job.status == "claimed", Job.lease_expires_at < now)
@@ -169,6 +187,7 @@ def reap_jobs(db: Session, now: datetime | None = None) -> dict[str, int]:
 
 
 def cancel_pending_jobs(db: Session, monitor_id: uuid.UUID) -> None:
+    """Cancel a monitor's not-yet-claimed jobs (on pause, edit, or delete). Caller commits."""
     db.execute(
         update(Job)
         .where(Job.monitor_id == monitor_id, Job.status == "pending")
