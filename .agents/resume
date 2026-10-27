@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Fast, idempotent repairs after the orb starts or wakes.
+set -euo pipefail
+
+# Kernel settings may not survive a snapshot restore; ICMP checks need this.
+echo '0 2147483647' | sudo tee /proc/sys/net/ipv4/ping_group_range >/dev/null
+
+# Docker is systemd-managed; make sure it is up (containers restart per their policy).
+systemctl is-active --quiet docker.service || sudo systemctl start --no-block docker.service

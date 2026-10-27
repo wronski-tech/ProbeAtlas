@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+# Prepares an Amp orb for ProbeAtlas: Docker + Compose, Python venv, web dependencies.
+# Idempotent and non-interactive; safe to rerun on a warm snapshot.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+COMPOSE_VERSION=v5.6.1
+BASE_IMAGES=(postgres:16-alpine python:3.11-slim node:22-alpine)
+
+step() { printf '\n==> %s\n' "$*"; STEP_START=$SECONDS; }
+done_step() { printf '    (%ss)\n' "$((SECONDS - STEP_START))"; }
+
+step "Docker Compose plugin"
+if ! docker compose version >/dev/null 2>&1; then
+  sudo mkdir -p /usr/local/lib/docker/cli-plugins
+  sudo curl -fsSL "https://github.com/docker/compose/releases/download/${COMPOSE_VERSION}/docker-compose-linux-x86_64" \
+    -o /usr/local/lib/docker/cli-plugins/docker-compose
+  sudo chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+fi
+docker compose version
+done_step
+
+step "Docker daemon (systemd-managed so it survives into snapshots)"
+sudo systemctl enable --now docker.service >/dev/null 2>&1 || sudo systemctl start docker.service
+id -nG "$USER" | tr ' ' '\n' | grep -qx docker || sudo usermod -aG docker "$USER"
+for _ in $(seq 1 30); do sudo docker info >/dev/null 2>&1 && break; sleep 1; done
+sudo docker info --format 'docker {{.ServerVersion}}'
+done_step
+
+step "Pre-pull base images"
+for image in "${BASE_IMAGES[@]}"; do
+  sudo docker image inspect "$image" >/dev/null 2>&1 || sudo docker pull -q "$image"
+done
+done_step
+
+step "Unprivileged ICMP sockets (agent ICMP checks and tests)"
+echo 'net.ipv4.ping_group_range = 0 2147483647' | sudo tee /etc/sysctl.d/99-probeatlas.conf >/dev/null
+echo '0 2147483647' | sudo tee /proc/sys/net/ipv4/ping_group_range >/dev/null
+done_step
+
+step "Python environment (.venv)"
+[ -x .venv/bin/python ] || uv venv -q --python 3.11 .venv
+uv pip install -q -p .venv -e ".[server,agent,cli,dev]"
+.venv/bin/python -c "import probeatlas.server.main, probeatlas.agent.main, probeatlas.cli.main"
+done_step
+
+step "Web dependencies (web/node_modules)"
+(cd web && npm ci --prefer-offline --no-audit --no-fund --loglevel=error)
+done_step
+
+step "Orb guidance for agents"
+guide="$HOME/.config/amp/AGENTS.md"
+marker="# ProbeAtlas orb notes"
+mkdir -p "$(dirname "$guide")"
+if ! grep -Fqx "$marker" "$guide" 2>/dev/null; then
+  cat >> "$guide" <<'EOF'
+
+# ProbeAtlas orb notes
+- Docker runs as the systemd unit `docker.service`; Compose v2 is installed. Use `sudo docker ...` if the
+  `docker` group is not active in your shell yet.
+- Full stack: `sudo docker compose up -d --build` (dashboard :3000, API :8000, worker metrics :9100,
+  demo-target control on 127.0.0.1:18081; port 8081 is used by the orb). Share :3000 with `amp orb portal 3000`.
+- Backend tests need PostgreSQL: `sudo docker compose up -d db`, then `.venv/bin/pytest`.
+- Lint: `.venv/bin/ruff check src tests`. Web: `cd web && npm run typecheck && npm test && npm run build`.
+- Outbound TCP from the orb goes through an egress proxy, so connect timings to public hosts are not realistic.
+EOF
+fi
+done_step
+
+printf '\nProbeAtlas orb setup complete.\n'

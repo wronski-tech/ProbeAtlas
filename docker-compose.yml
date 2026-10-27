@@ -20,6 +20,10 @@ x-server-env: &server-env
   PROBEATLAS_WEBHOOK_ALLOWED_PRIVATE_CIDRS: ${PROBEATLAS_WEBHOOK_ALLOWED_PRIVATE_CIDRS:-}
   PROBEATLAS_LOG_LEVEL: INFO
 
+x-server-image: &server-image
+  build: { context: ., dockerfile: deploy/Dockerfile.server }
+  image: probeatlas-server:dev
+
 x-agent: &agent
   build: { context: ., dockerfile: deploy/Dockerfile.agent }
   image: probeatlas-agent:dev
@@ -41,6 +45,7 @@ services:
       POSTGRES_DB: probeatlas
     ports: ["127.0.0.1:5432:5432"]
     volumes: [pgdata:/var/lib/postgresql/data]
+    restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U probeatlas"]
       interval: 2s
@@ -49,8 +54,7 @@ services:
     networks: [control]
 
   migrate:
-    build: { context: ., dockerfile: deploy/Dockerfile.server }
-    image: probeatlas-server:dev
+    <<: *server-image
     command: ["probeatlas-admin", "migrate"]
     environment: *server-env
     depends_on:
@@ -58,7 +62,7 @@ services:
     networks: [control]
 
   api:
-    image: probeatlas-server:dev
+    <<: *server-image
     command: ["probeatlas-api"]
     environment: *server-env
     ports: ["8000:8000"]
@@ -73,7 +77,7 @@ services:
     networks: [control]
 
   worker:
-    image: probeatlas-server:dev
+    <<: *server-image
     command: ["probeatlas-worker"]
     environment: *server-env
     depends_on:
