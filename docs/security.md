@@ -57,7 +57,12 @@ at a time cannot hold an agent or worker thread past the check timeout.
 Other limits: fixed check types with validated settings (no commands, scripts,
 custom headers, or request bodies); timeouts capped at 30 s; response bodies
 read at most 64 KiB and never stored; minimum interval per workspace (default
-30 s); monitor quota per workspace (default 25); at most 10 regions per monitor.
+30 s); monitor quota per workspace (default 25); at most 10 regions per monitor;
+at most 120 checks per minute from one workspace to any one destination host
+(`PROBEATLAS_MAX_CHECKS_PER_MINUTE_PER_DESTINATION`, counted as regions × 60 /
+interval over active monitors, all check types and ports). The budget is per
+workspace so that no tenant can use up another's budget or learn what others
+monitor.
 
 ## Authentication
 
@@ -66,6 +71,10 @@ read at most 64 KiB and never stored; minimum interval per workspace (default
 * Sessions (`pas_…`), API keys (`pak_<id>_<secret>`), agent tokens (`paa_…`),
   enrollment tokens (`pae_…`) are 256-bit random values. Only SHA-256 digests are
   stored. Secrets are shown once at creation.
+* Sign-up is invite-only by default (`PROBEATLAS_REGISTRATION=invite`): an account
+  can only be created with a pending invitation for that email, either from a
+  workspace owner or from the operator (`probeatlas-admin create-workspace`).
+  The account joins the inviting workspace and gets no workspace of its own.
 * Workspace membership requires consent: owners create an invitation (a `pai_…`
   token valid for 7 days, shown once) and the invitee joins by accepting it with
   the signed-in account whose email it was sent to. Invitation responses are the

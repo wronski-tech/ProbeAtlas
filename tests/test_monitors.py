@@ -107,6 +107,44 @@ def test_workspace_limits(account, agent_a, db):
     assert r.status_code == 403 and r.json()["error"]["code"] == "limit_exceeded"
 
 
+
+def test_per_destination_check_budget(account, other_account, agent_a, agent_b, settings):
+    settings.set(max_checks_per_minute_per_destination=10)
+    both = ["test-a", "test-b"]
+    # Checks per minute = regions x 60 / interval, summed over active monitors on the same host, any type.
+    web = account.create_monitor(target="https://example.com/health", regions=both, interval_seconds=30)  # 4
+    account.create_monitor(name="tcp", type="tcp", target="EXAMPLE.com", settings={"port": 443},
+                           regions=both, interval_seconds=30)  # 4
+    dns = account.create_monitor(name="dns", type="dns", target="example.com", regions=["test-a"],
+                           interval_seconds=30)  # 2 -> exactly at the limit
+
+    def create(**body):
+        """POST a monitor (HTTP, region test-a, 60 s unless overridden) and return the response."""
+        return account.post("/v1/monitors", {"name": "x", "type": "http", "regions": ["test-a"],
+                                             "interval_seconds": 60, **body})
+
+    over = create(target="https://example.com/other?page=2")  # +1: another path on the same host
+    assert over.status_code == 403 and over.json()["error"]["code"] == "limit_exceeded"
+    assert "example.com" in over.json()["error"]["message"]
+    assert create(target="https://other.example.net/").status_code == 201  # different host, own budget
+    # Other tenants' monitors never count against this workspace (and cannot exhaust it).
+    other = other_account.post("/v1/monitors", {"name": "x", "type": "http", "target": "https://example.com/",
+                                                "regions": both, "interval_seconds": 30})
+    assert other.status_code == 201
+
+    # Paused monitors do not count, but resuming one is checked.
+    paused = create(target="https://example.com/paused", paused=True)
+    assert paused.status_code == 201
+    assert account.post(f"/v1/monitors/{paused.json()['id']}/resume").status_code == 403
+    # Updates are checked too, and a rejected update leaves the monitor unchanged.
+    r = account.patch(f"/v1/monitors/{dns['id']}", {"regions": both})  # 2 -> 4 per minute
+    assert r.status_code == 403
+    assert account.get(f"/v1/monitors/{dns['id']}").json()["regions"] == ["test-a"]
+    # Freeing budget (4 -> 2 per minute) lets the paused monitor resume.
+    assert account.patch(f"/v1/monitors/{web['id']}", {"interval_seconds": 60}).status_code == 200
+    assert account.post(f"/v1/monitors/{paused.json()['id']}/resume").status_code == 200
+
+
 def test_cursor_pagination(account, agent_a):
     created = [account.create_monitor(name=f"m{i}")["id"] for i in range(5)]
     seen, cursor, pages = [], None, 0

@@ -24,6 +24,8 @@ BOOTSTRAP_TOKEN = "pae_test-bootstrap-token-0000000000"
 os.environ["PROBEATLAS_DATABASE_URL"] = TEST_DB
 os.environ["PROBEATLAS_BOOTSTRAP_ENROLLMENT_TOKEN"] = BOOTSTRAP_TOKEN
 os.environ["PROBEATLAS_LOG_FORMAT"] = "text"
+# Fixtures register tenants freely; invite-only sign-up (the default) is tested by overriding this.
+os.environ["PROBEATLAS_REGISTRATION"] = "open"
 
 from fastapi.testclient import TestClient  # noqa: E402
 from sqlalchemy import create_engine, text  # noqa: E402

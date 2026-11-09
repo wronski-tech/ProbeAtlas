@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -17,8 +18,9 @@ class Settings(BaseSettings):
     env: str = "development"
     database_url: str = "postgresql+psycopg://probeatlas:probeatlas@localhost:5432/probeatlas"
 
-    # Accounts
-    allow_registration: bool = True
+    # Accounts. "invite": new accounts need an invitation (from a workspace owner, or from
+    # `probeatlas-admin create-workspace` for a new customer). "open": anyone may sign up.
+    registration: Literal["invite", "open"] = "invite"
     session_ttl_hours: int = 24 * 7
 
     # Tenant limits (defaults applied to new workspaces)
@@ -26,6 +28,9 @@ class Settings(BaseSettings):
     min_interval_seconds: int = 30
     max_timeout_ms: int = 30_000
     max_regions_per_monitor: int = 10
+    # Abuse limit: scheduled checks per minute one workspace may direct at a single destination host
+    # (sum over its active monitors of regions x 60 / interval).
+    max_checks_per_minute_per_destination: int = 120
     rate_limit_per_minute: int = 300
     auth_rate_limit_per_minute: int = 20
 

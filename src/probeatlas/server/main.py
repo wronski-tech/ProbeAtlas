@@ -49,7 +49,7 @@ Fields that do not apply or were not measured are `null`.
 
 
 def bootstrap_enrollment_token() -> None:
-    """Register PROBEATLAS_BOOTSTRAP_ENROLLMENT_TOKEN (local development convenience)."""
+    """Register PROBEATLAS_BOOTSTRAP_ENROLLMENT_TOKEN (local development only; refused in production)."""
     settings = get_settings()
     token = settings.bootstrap_enrollment_token
     if not token:
@@ -57,7 +57,9 @@ def bootstrap_enrollment_token() -> None:
     if not token.startswith(PREFIX_ENROLLMENT + "_") or len(token) < 24:
         raise SystemExit("PROBEATLAS_BOOTSTRAP_ENROLLMENT_TOKEN must start with 'pae_' and be >= 24 chars")
     if settings.is_production:
-        log.warning("bootstrap enrollment token configured in production; prefer probeatlas-admin tokens")
+        # A long-lived, multi-use, region-less token lets anyone who obtains it run agents in any region.
+        raise SystemExit("PROBEATLAS_BOOTSTRAP_ENROLLMENT_TOKEN is for local development only; unset it in "
+                         "production and issue scoped tokens with `probeatlas-admin create-enrollment-token`")
     with new_session() as db:
         db.execute(
             pg_insert(EnrollmentToken)
@@ -74,6 +76,8 @@ async def lifespan(_app: FastAPI):
     settings = get_settings()
     if settings.allow_private_targets:
         log.warning("PROBEATLAS_ALLOW_PRIVATE_TARGETS is enabled: private hostnames accepted (development only)")
+    if settings.registration == "open":
+        log.warning("PROBEATLAS_REGISTRATION=open: anyone can sign up and create a workspace")
     bootstrap_enrollment_token()
     yield
 

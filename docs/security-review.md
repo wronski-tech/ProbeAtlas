@@ -27,8 +27,8 @@ The controls themselves are described in [security.md](security.md).
 
 ### Actors
 
-* **Anonymous internet user.** Can reach the web, API, and agent protocol endpoints. Self-registration is
-  on by default.
+* **Anonymous internet user.** Can reach the web, API, and agent protocol endpoints. Sign-up is
+  invite-only by default, so creating an account needs an invitation.
 * **Tenant user or API key.** An authenticated member of one workspace. It is the most capable untrusted
   actor: it controls targets, webhook URLs, and alert rules, and can run any public host it chooses as a
   check target.
@@ -59,7 +59,7 @@ The controls themselves are described in [security.md](security.md).
 | Credential theft from the database or logs | hashed tokens, scrypt passwords, log redaction (message and fields), `hide_parameters` | `test_auth.py` |
 | CSRF and login CSRF in the dashboard | httpOnly SameSite=Lax cookie; every mutating web route requires `x-probeatlas-csrf: 1` | `web/src/lib/proxy.test.ts` (path rules); manual |
 | Result forgery or replay | results accepted only for jobs leased to that agent; unique `job_id`; timestamp skew check | `test_ingestion.py` |
-| Abuse of agents as a scanner or flooder | fixed check types, no custom payloads, port policy, per-workspace quotas and minimum interval | `test_monitors.py` |
+| Abuse of agents as a scanner or flooder | invite-only sign-up, fixed check types, no custom payloads, port policy, per-workspace quotas, minimum interval, and a per-workspace check budget per destination host | `test_auth.py`, `test_monitors.py` |
 
 ### Accepted risks (by design, for now)
 
@@ -68,10 +68,12 @@ The controls themselves are described in [security.md](security.md).
   `probeatlas-admin disable-agent`, audit events. Planned: per-agent token rotation, and cross-checking
   results across agents.
 * **Enrollment tokens without a region** let an agent create a new region label. The bootstrap token
-  (`region=None`, 1000 uses) is for local development only and must be unset in production.
-* **Outbound abuse.** One email can create up to 10 workspaces × 25 monitors × 10 regions at 30 s
-  intervals, against any public host and port. Sign-up controls and per-destination volume limits are
-  on the production checklist.
+  (`region=None`, 1000 uses) is for local development only; the API refuses to start with it when
+  `PROBEATLAS_ENV=production`.
+* **Outbound abuse by invited customers.** Accounts exist only by invitation, and each workspace may send
+  at most 120 checks per minute to one destination host. An owner can still create up to 10 workspaces,
+  each with its own budget, and can spread checks across many hosts or subdomains. Email verification
+  and per-email caps are needed before sign-up is opened to everyone.
 
 ## 2. Internal review (2026-10-27)
 

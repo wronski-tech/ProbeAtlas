@@ -135,13 +135,37 @@ Production settings:
 PROBEATLAS_ENV=production
 PROBEATLAS_DATABASE_URL=postgresql+psycopg://…?sslmode=require
 PROBEATLAS_ALLOW_PRIVATE_TARGETS=false            # default
-PROBEATLAS_BOOTSTRAP_ENROLLMENT_TOKEN=             # unset; use probeatlas-admin tokens
+PROBEATLAS_BOOTSTRAP_ENROLLMENT_TOKEN=             # unset (the API refuses to start with it in production)
 PROBEATLAS_WEBHOOK_ALLOWED_PRIVATE_CIDRS=          # unset
-PROBEATLAS_ALLOW_REGISTRATION=false                # until you open sign-ups
+PROBEATLAS_REGISTRATION=invite                     # default; customers are onboarded by invitation
 PROBEATLAS_TRUSTED_PROXIES=<web server IPs>,<API load balancer CIDR>   # who may set X-Forwarded-For
 PROBEATLAS_WEB_TRUSTED_PROXY_HOPS=1                # web container: proxies in front of it (e.g. the LB)
 PROBEATLAS_WEBHOOK_NAMESERVERS=1.1.1.1,8.8.8.8     # public resolvers for webhook destinations
 ```
+
+### Onboarding customers (invite-only sign-up)
+
+With `PROBEATLAS_REGISTRATION=invite` (the default) nobody can create an account without an invitation.
+Onboard a new customer with:
+
+```bash
+probeatlas-admin create-workspace --name "Acme" --owner-email ops@acme.example
+# -> {"workspace_id": "...", "owner_email": "ops@acme.example", "invitation_token": "pai_...",
+#     "invite_path": "/invite/pai_...", "expires_at": "..."}
+```
+
+Send `https://<dashboard>/invite/pai_...` to the customer. They register (or sign in) with that email
+and become the workspace owner; they can then invite their own teammates from **Settings → Members**.
+The link is single-use and expires after 7 days; run the command again to issue a new one.
+
+### Outbound volume per destination
+
+Each workspace may send at most `PROBEATLAS_MAX_CHECKS_PER_MINUTE_PER_DESTINATION` (default 120) checks
+per minute to any one destination host, counted over its active monitors as regions × 60 / interval
+(all check types, every path and port of that host). Creating, changing, or resuming a monitor beyond
+that returns `403 limit_exceeded`. The budget is per workspace on purpose: a platform-wide budget would
+let one tenant exhaust it for a host another customer needs to monitor, and would reveal what others
+monitor. A user who owns several workspaces gets a budget in each.
 
 ### Client IP forwarding
 
@@ -173,8 +197,8 @@ API client ─▶ load balancer ─(XFF: client)─▶ API
 - [ ] Enable PITR on the managed database and schedule daily dumps + monthly drills.
 - [x] CI: lint, documentation coverage, tests on PostgreSQL, migration drift, OpenAPI drift, image builds.
 - [ ] Load test (target: 10k checks/minute) and dashboards for the metrics above.
-- [ ] Abuse controls for sign-up (email verification, CAPTCHA) and outbound
-      volume per destination.
+- [x] Invite-only sign-up and a per-workspace check budget per destination host.
+- [ ] Email verification, CAPTCHA, and per-email workspace caps before opening sign-up to everyone.
 - [x] Internal security review; critical and high findings fixed ([security-review.md](security-review.md)).
 - [x] Fix the internal review findings (all closed; see [security-review.md](security-review.md)).
 - [ ] External penetration test (scope in [security-review.md](security-review.md#3-external-penetration-test-package)).

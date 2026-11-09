@@ -160,6 +160,11 @@ curl -s -X POST $API/v1/invitations/accept -H "Authorization: Bearer $BOB_SESSIO
   -H 'Content-Type: application/json' -d '{"token": "pai_..."}'
 ```
 
+Someone without an account registers with the token instead: `POST /v1/auth/register` with
+`invitation_token` creates the account directly in the inviting workspace (no workspace of its own). With
+invite-only sign-up (the server default) this is the only way to register; without a token the API returns
+`403 invitation_required`, and an unknown or mismatched token returns `403 invalid_invitation`.
+
 The create response is the same whether or not the email has an account. Unknown, expired, revoked,
 already-used, and wrong-account tokens all return `404 not_found`. Invitations expire after 7 days.
 `GET /v1/notification-channels` returns full webhook URLs only to owners; members and API keys see

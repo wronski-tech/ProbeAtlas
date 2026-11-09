@@ -80,7 +80,8 @@ hand: `docker compose run --rm migrate` (or `probeatlas-admin migrate` with
 
 ### Demo walkthrough
 
-1. Open http://localhost:3000, register, and you land in your workspace.
+1. Open http://localhost:3000, register, and you land in your workspace. (Compose enables open sign-up
+   for local development; production defaults to invite-only, see [operations](docs/operations.md#onboarding-customers-invite-only-sign-up).)
 2. **New monitor** → type HTTP, URL `http://demo-target:8080/`, regions
    `dev-local-a` and `dev-local-b`, interval 10 s. Keep the default alert rule.
    (`demo-target` is a private container; it is accepted only because the
@@ -144,7 +145,8 @@ Run components outside Docker:
 
 ```bash
 export PROBEATLAS_DATABASE_URL=postgresql+psycopg://probeatlas:probeatlas@localhost:5432/probeatlas
-export PROBEATLAS_BOOTSTRAP_ENROLLMENT_TOKEN=pae_local-dev-only-enrollment-token
+export PROBEATLAS_BOOTSTRAP_ENROLLMENT_TOKEN=pae_local-dev-only-enrollment-token   # refused in production
+export PROBEATLAS_REGISTRATION=open           # local only; the default is invite-only sign-up
 .venv/bin/probeatlas-admin migrate
 .venv/bin/probeatlas-api                      # :8000
 .venv/bin/probeatlas-worker                   # scheduler + housekeeping, metrics :9100
@@ -184,12 +186,13 @@ and [.env.example](.env.example)):
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `DATABASE_URL` | local postgres | SQLAlchemy URL (`postgresql+psycopg://…`) |
-| `ENV` | `development` | `production` enables secure-cookie expectations and warnings |
-| `ALLOW_REGISTRATION` | `true` | Self-service sign-up |
+| `ENV` | `development` | `production` enables secure-cookie expectations and refuses development-only settings |
+| `REGISTRATION` | `invite` | `invite`: new accounts need an invitation (workspace owner or `probeatlas-admin create-workspace`); `open`: anyone can sign up |
 | `ALLOW_PRIVATE_TARGETS` | `false` | **Dev only.** Accept private hostnames as targets |
 | `WEBHOOK_ALLOWED_PRIVATE_CIDRS` | empty | Private ranges webhooks may reach (dev/test) |
-| `BOOTSTRAP_ENROLLMENT_TOKEN` | empty | Multi-use enrollment token for local agents |
+| `BOOTSTRAP_ENROLLMENT_TOKEN` | empty | **Dev only.** Multi-use enrollment token for local agents; the API refuses to start with it in production |
 | `DEFAULT_MAX_MONITORS` / `MIN_INTERVAL_SECONDS` | 25 / 30 | Per-workspace limits for new workspaces |
+| `MAX_CHECKS_PER_MINUTE_PER_DESTINATION` | 120 | Checks per minute one workspace may send to one destination host |
 | `RATE_LIMIT_PER_MINUTE` / `AUTH_RATE_LIMIT_PER_MINUTE` | 300 / 20 | API rate limits |
 | `WEBHOOK_NAMESERVERS` | empty | Resolvers for webhook destinations (empty = host resolver) |
 | `TRUSTED_PROXIES` | empty | IPs/CIDRs (web server, load balancer) allowed to set `X-Forwarded-For` |

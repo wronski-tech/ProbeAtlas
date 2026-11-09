@@ -1,6 +1,7 @@
-"""Operator commands: migrations, agent enrollment, agent management.
+"""Operator commands: migrations, customer onboarding, agent enrollment, agent management.
 
 probeatlas-admin migrate
+probeatlas-admin create-workspace --name "Acme" --owner-email ops@acme.example
 probeatlas-admin create-enrollment-token --region eu-central --max-uses 1 --expires-in-hours 24
 probeatlas-admin list-agents
 probeatlas-admin disable-agent <agent-id>
@@ -16,6 +17,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 
 def migrate(revision: str = "head") -> None:
@@ -31,11 +33,44 @@ def migrate(revision: str = "head") -> None:
     command.upgrade(cfg, revision)
 
 
+def create_workspace(db: Session, name: str, owner_email: str) -> dict[str, str]:
+    """Create an ownerless workspace and an owner invitation for ``owner_email``; return the invitation.
+
+    The invitee opens ``/invite/<token>`` in the dashboard and registers (or signs in) with that email to
+    become the owner. This is how new customers get an account when sign-up is invite-only.
+    """
+    from .api.auth import INVITATION_TTL, new_workspace
+    from .audit import audit
+    from .config import get_settings
+    from .models import Invitation
+    from .schemas import InvitationCreate
+    from .security import PREFIX_INVITATION, new_token, token_hash
+
+    email = InvitationCreate(email=owner_email, role="owner").email.lower()  # validates the address
+    ws = new_workspace(db, get_settings(), name, owner=None)
+    token, now = new_token(PREFIX_INVITATION), datetime.now(UTC)
+    inv = Invitation(workspace_id=ws.id, email=email, role="owner",
+                     token_hash=token_hash(token), created_at=now, expires_at=now + INVITATION_TTL)
+    db.add(inv)
+    db.flush()
+    audit(db, "workspace.created", workspace_id=ws.id, actor_type="system", target_type="workspace",
+          target_id=ws.id, details={"name": name})
+    audit(db, "invitation.created", workspace_id=ws.id, actor_type="system", target_type="invitation",
+          target_id=inv.id, details={"role": "owner"})
+    db.commit()
+    return {"workspace_id": str(ws.id), "owner_email": inv.email, "invitation_token": token,
+            "invite_path": f"/invite/{token}", "expires_at": inv.expires_at.isoformat()}
+
+
 def main(argv: list[str] | None = None) -> None:
     """Parse ``probeatlas-admin`` arguments and run the selected operator command."""
     parser = argparse.ArgumentParser(prog="probeatlas-admin")
     sub = parser.add_subparsers(dest="cmd", required=True)
     sub.add_parser("migrate", help="apply database migrations")
+    w = sub.add_parser("create-workspace",
+                       help="onboard a customer: create a workspace and an owner invitation (invite-only sign-up)")
+    w.add_argument("--name", required=True)
+    w.add_argument("--owner-email", required=True)
     t = sub.add_parser("create-enrollment-token", help="issue a token that lets agents enroll")
     t.add_argument("--region", help="restrict enrollment to this region")
     t.add_argument("--max-uses", type=int, default=1)
@@ -57,7 +92,9 @@ def main(argv: list[str] | None = None) -> None:
     from .security import PREFIX_ENROLLMENT, new_token, token_hash
 
     with new_session() as db:
-        if args.cmd == "create-enrollment-token":
+        if args.cmd == "create-workspace":
+            print(json.dumps(create_workspace(db, args.name, args.owner_email), indent=2))
+        elif args.cmd == "create-enrollment-token":
             token = new_token(PREFIX_ENROLLMENT)
             et = EnrollmentToken(
                 token_hash=token_hash(token), description=args.description, region=args.region,

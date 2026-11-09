@@ -56,13 +56,17 @@ def _workspaces(db: Session, user_id: uuid.UUID) -> list[WorkspaceOut]:
     return [WorkspaceOut.model_validate(ws).model_copy(update={"role": role}) for ws, role in rows]
 
 
-def _new_workspace(db: Session, settings: Settings, name: str, owner: User) -> Workspace:
-    """Create a workspace with default limits and make ``owner`` its owner (caller commits)."""
+def new_workspace(db: Session, settings: Settings, name: str, owner: User | None) -> Workspace:
+    """Create a workspace with default limits and make ``owner`` its owner (caller commits).
+
+    ``owner`` is ``None`` only for operator-created workspaces, whose first owner joins by invitation.
+    """
     ws = Workspace(name=name, max_monitors=settings.default_max_monitors,
                    min_interval_seconds=settings.min_interval_seconds)
     db.add(ws)
     db.flush()
-    db.add(Membership(workspace_id=ws.id, user_id=owner.id, role="owner"))
+    if owner is not None:
+        db.add(Membership(workspace_id=ws.id, user_id=owner.id, role="owner"))
     return ws
 
 
@@ -80,22 +84,42 @@ def _issue_session(db: Session, settings: Settings, user: User) -> SessionOut:
 @router.post("/auth/register", response_model=SessionOut, status_code=201)
 def register(body: RegisterRequest, request: Request, db: Session = Depends(get_db),
              settings: Settings = Depends(get_settings)):
-    """Create an account and a first workspace, and return a session.
+    """Create an account and return a session.
 
-    Rate limited per client IP. Returns 403 when registration is disabled and 409 if the email is taken.
+    With an ``invitation_token`` the account joins the inviting workspace with the invited role. Without
+    one, a new workspace is created, which requires open registration on this server.
+
+    Rate limited per client IP. Returns 403 ``invitation_required`` when sign-up is invite-only and no
+    invitation was given, 403 ``invalid_invitation`` when the invitation is unknown, expired, used, revoked,
+    or addressed to another email, and 409 if the email is taken.
     """
-    limiter.hit(f"auth:{client_ip(request)}", settings.auth_rate_limit_per_minute)
-    if not settings.allow_registration:
-        raise APIError(403, "registration_disabled", "self-service registration is disabled")
-    email = body.email.lower()
+    ip = client_ip(request)
+    limiter.hit(f"auth:{ip}", settings.auth_rate_limit_per_minute)
+    email, now = body.email.lower(), datetime.now(UTC)
+    inv = None
+    if body.invitation_token:
+        inv = db.execute(_pending(select(Invitation), now).where(
+            Invitation.token_hash == token_hash(body.invitation_token)).with_for_update()).scalar_one_or_none()
+        if inv is None or inv.email != email:
+            raise APIError(403, "invalid_invitation",
+                           "this invitation is invalid, expired, or was sent to a different email address")
+    elif settings.registration != "open":
+        raise APIError(403, "invitation_required", "sign-up is by invitation only")
     if db.execute(select(User.id).where(User.email == email)).first():
         raise APIError(409, "email_taken", "an account with this email already exists")
     user = User(email=email, name=body.name, password_hash=hash_password(body.password))
     db.add(user)
     db.flush()
-    ws = _new_workspace(db, settings, body.workspace_name, user)
-    audit(db, "user.registered", workspace_id=ws.id, actor_type="user", actor_id=user.id,
-          target_type="user", target_id=user.id, ip=client_ip(request))
+    if inv is None:
+        ws_id = new_workspace(db, settings, body.workspace_name, user).id
+    else:
+        ws_id = inv.workspace_id
+        inv.accepted_at, inv.accepted_by = now, user.id
+        db.add(Membership(workspace_id=ws_id, user_id=user.id, role=inv.role))
+        audit(db, "invitation.accepted", workspace_id=ws_id, actor_type="user", actor_id=user.id,
+              target_type="invitation", target_id=inv.id, ip=ip, details={"role": inv.role})
+    audit(db, "user.registered", workspace_id=ws_id, actor_type="user", actor_id=user.id,
+          target_type="user", target_id=user.id, ip=ip)
     return _issue_session(db, settings, user)
 
 
@@ -151,7 +175,7 @@ def create_workspace(body: WorkspaceCreate, request: Request, user: User = Depen
                                                                           Membership.role == "owner")).scalar_one()
     if count >= 10:
         raise APIError(403, "limit_exceeded", "a user may own at most 10 workspaces")
-    ws = _new_workspace(db, settings, body.name, user)
+    ws = new_workspace(db, settings, body.name, user)
     audit(db, "workspace.created", workspace_id=ws.id, actor_type="user", actor_id=user.id,
           target_type="workspace", target_id=ws.id, ip=client_ip(request))
     db.commit()

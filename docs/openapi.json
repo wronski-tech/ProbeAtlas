@@ -12,7 +12,7 @@
           "auth & workspaces"
         ],
         "summary": "Register",
-        "description": "Create an account and a first workspace, and return a session.\n\nRate limited per client IP. Returns 403 when registration is disabled and 409 if the email is taken.",
+        "description": "Create an account and return a session.\n\nWith an ``invitation_token`` the account joins the inviting workspace with the invited role. Without\none, a new workspace is created, which requires open registration on this server.\n\nRate limited per client IP. Returns 403 ``invitation_required`` when sign-up is invite-only and no\ninvitation was given, 403 ``invalid_invitation`` when the invitation is unknown, expired, used, revoked,\nor addressed to another email, and 409 if the email is taken.",
         "operationId": "register_v1_auth_register_post",
         "requestBody": {
           "content": {
@@ -1137,7 +1137,7 @@
           "monitors"
         ],
         "summary": "Create Monitor",
-        "description": "Create a monitor. Checks are scheduled immediately unless ``paused`` is true.\n\nValidates type-specific settings, workspace limits, region availability, and the target against the\noutbound network policy.",
+        "description": "Create a monitor. Checks are scheduled immediately unless ``paused`` is true.\n\nValidates type-specific settings, workspace limits, region availability, and the target against the\noutbound network policy. Active monitors in a workspace may send at most 120 checks per minute (server\ndefault) to any one destination host, counted as regions x 60 / interval; more returns 403\n``limit_exceeded``.",
         "operationId": "create_monitor_v1_monitors_post",
         "parameters": [
           {
@@ -1289,7 +1289,7 @@
           "monitors"
         ],
         "summary": "Update Monitor",
-        "description": "Partially update a monitor. Every change increments ``config_version``.\n\nJobs that are already scheduled keep the configuration they were created with.",
+        "description": "Partially update a monitor. Every change increments ``config_version``.\n\nJobs that are already scheduled keep the configuration they were created with. Changes to the target,\nregions, or interval are checked against the per-destination check budget (see create).",
         "operationId": "update_monitor_v1_monitors__monitor_id__patch",
         "parameters": [
           {
@@ -1521,7 +1521,7 @@
           "monitors"
         ],
         "summary": "Resume Monitor",
-        "description": "Resume a paused monitor and schedule a check immediately.",
+        "description": "Resume a paused monitor and schedule a check immediately.\n\nReturns 403 ``limit_exceeded`` if resuming would exceed the workspace's per-destination check budget.",
         "operationId": "resume_monitor_v1_monitors__monitor_id__resume_post",
         "parameters": [
           {
@@ -6722,6 +6722,18 @@
             "minLength": 1,
             "title": "Workspace Name",
             "default": "My workspace"
+          },
+          "invitation_token": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Invitation Token"
           }
         },
         "type": "object",
@@ -6731,7 +6743,7 @@
           "name"
         ],
         "title": "RegisterRequest",
-        "description": "Create an account and its first workspace. Passwords must be 10-256 characters."
+        "description": "Create an account. Passwords must be 10-256 characters.\n\nWith ``invitation_token`` the account joins the inviting workspace (the invitation must be pending and\naddressed to ``email``) and ``workspace_name`` is ignored. Without it, a new workspace is created; that\nis only allowed when the server runs with open registration."
       },
       "ResultAck": {
         "properties": {

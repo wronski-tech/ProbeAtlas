@@ -15,6 +15,8 @@ x-server-env: &server-env
   PROBEATLAS_DATABASE_URL: postgresql+psycopg://probeatlas:probeatlas@db:5432/probeatlas
   # Development-only: lets monitors target the demo-target container by name.
   PROBEATLAS_ALLOW_PRIVATE_TARGETS: "true"
+  # Development-only: anyone can register at /register. Production defaults to invite-only sign-up.
+  PROBEATLAS_REGISTRATION: ${PROBEATLAS_REGISTRATION:-open}
   PROBEATLAS_BOOTSTRAP_ENROLLMENT_TOKEN: ${PROBEATLAS_BOOTSTRAP_ENROLLMENT_TOKEN:-pae_local-dev-only-enrollment-token}
   PROBEATLAS_MIN_INTERVAL_SECONDS: "10"
   PROBEATLAS_WEBHOOK_ALLOWED_PRIVATE_CIDRS: ${PROBEATLAS_WEBHOOK_ALLOWED_PRIVATE_CIDRS:-}

@@ -32,7 +32,7 @@ from ..schemas import (
     encode_cursor,
     validate_settings,
 )
-from ..targets import normalize_target
+from ..targets import destination_host, normalize_target
 
 router = APIRouter(prefix="/v1/monitors", tags=["monitors"])
 
@@ -58,6 +58,30 @@ def _validate_limits(ws: Workspace, interval: int, timeout_ms: int, settings: Se
         raise APIError(422, "validation_error", f"timeout_ms may not exceed {settings.max_timeout_ms}")
     if timeout_ms > interval * 1000:
         raise APIError(422, "validation_error", "timeout_ms must not exceed the check interval")
+
+
+def _check_destination_budget(db: Session, workspace_id: uuid.UUID, settings: Settings, check_type: str,
+                              target: str, regions: list[str], interval: int,
+                              exclude: uuid.UUID | None = None) -> None:
+    """Reject a configuration that would send too many checks per minute to one destination host.
+
+    Counts this workspace's active monitors on the same host (other tenants' monitors never count, so one
+    tenant cannot use up another's budget or learn what others monitor). ``exclude`` is the monitor being
+    changed. Locks the workspace row so concurrent changes are checked one at a time.
+    """
+    db.execute(select(Workspace.id).where(Workspace.id == workspace_id).with_for_update())
+    host = destination_host(check_type, target)
+    q = select(Monitor.check_type, Monitor.target, Monitor.regions, Monitor.interval_seconds).where(
+        Monitor.workspace_id == workspace_id, Monitor.is_paused.is_(False))
+    if exclude is not None:
+        q = q.where(Monitor.id != exclude)
+    rate = len(regions) * 60 / interval + sum(
+        len(r) * 60 / i for t, tg, r, i in db.execute(q) if destination_host(t, tg) == host)
+    limit = settings.max_checks_per_minute_per_destination
+    if rate > limit:
+        raise APIError(403, "limit_exceeded",
+                       f"this would send {rate:g} checks per minute to {host} (limit {limit} per workspace); "
+                       "use fewer regions or a longer interval")
 
 
 @router.get("", response_model=Page[MonitorOut])
@@ -92,7 +116,9 @@ def create_monitor(body: MonitorCreate, p: Principal = Depends(get_principal), d
     """Create a monitor. Checks are scheduled immediately unless ``paused`` is true.
 
     Validates type-specific settings, workspace limits, region availability, and the target against the
-    outbound network policy.
+    outbound network policy. Active monitors in a workspace may send at most 120 checks per minute (server
+    default) to any one destination host, counted as regions x 60 / interval; more returns 403
+    ``limit_exceeded``.
     """
     ws = db.get(Workspace, p.workspace_id)
     count = db.execute(select(func.count()).select_from(Monitor).where(Monitor.workspace_id == ws.id)).scalar_one()
@@ -102,6 +128,8 @@ def create_monitor(body: MonitorCreate, p: Principal = Depends(get_principal), d
     _validate_limits(ws, body.interval_seconds, body.timeout_ms, settings)
     _validate_regions(db, body.regions, settings)
     target = normalize_target(body.type, body.target, body.settings, settings.target_policy())
+    if not body.paused:
+        _check_destination_budget(db, ws.id, settings, body.type, target, body.regions, body.interval_seconds)
     now = datetime.now(UTC)
     m = Monitor(
         workspace_id=p.workspace_id, name=body.name, check_type=body.type.value, target=target,
@@ -128,7 +156,8 @@ def update_monitor(monitor_id: uuid.UUID, body: MonitorUpdate, p: Principal = De
                    db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
     """Partially update a monitor. Every change increments ``config_version``.
 
-    Jobs that are already scheduled keep the configuration they were created with.
+    Jobs that are already scheduled keep the configuration they were created with. Changes to the target,
+    regions, or interval are checked against the per-destination check budget (see create).
     """
     m = tenant_get(db, Monitor, monitor_id, p, "monitor")
     changes = body.model_dump(exclude_unset=True)
@@ -150,6 +179,9 @@ def update_monitor(monitor_id: uuid.UUID, body: MonitorUpdate, p: Principal = De
     for field in ("name", "interval_seconds", "timeout_ms", "regions"):
         if changes.get(field) is not None:
             setattr(m, field, changes[field])
+    if not m.is_paused and changes.keys() & {"target", "settings", "regions", "interval_seconds"}:
+        _check_destination_budget(db, ws.id, settings, m.check_type, m.target, m.regions, m.interval_seconds,
+                                  exclude=m.id)
     if "latency_threshold_ms" in changes:
         m.latency_threshold_ms = changes["latency_threshold_ms"]
     m.config_version += 1
@@ -173,10 +205,13 @@ def delete_monitor(monitor_id: uuid.UUID, p: Principal = Depends(get_principal),
 def _set_paused(monitor_id: uuid.UUID, paused: bool, p: Principal, db: Session) -> MonitorOut:
     """Pause or resume a monitor; changing to the current state is a no-op.
 
-    Pausing cancels pending jobs. Resuming schedules a check immediately and resets the state to ``unknown``
-    until new results arrive.
+    Pausing cancels pending jobs. Resuming checks the destination budget, schedules a check immediately, and
+    resets the state to ``unknown`` until new results arrive.
     """
     m = tenant_get(db, Monitor, monitor_id, p, "monitor")
+    if m.is_paused and not paused:
+        _check_destination_budget(db, p.workspace_id, get_settings(), m.check_type, m.target, m.regions,
+                                  m.interval_seconds, exclude=m.id)
     if m.is_paused != paused:
         m.is_paused = paused
         m.updated_at = datetime.now(UTC)
@@ -199,7 +234,10 @@ def pause_monitor(monitor_id: uuid.UUID, p: Principal = Depends(get_principal), 
 
 @router.post("/{monitor_id}/resume", response_model=MonitorOut)
 def resume_monitor(monitor_id: uuid.UUID, p: Principal = Depends(get_principal), db: Session = Depends(get_db)):
-    """Resume a paused monitor and schedule a check immediately."""
+    """Resume a paused monitor and schedule a check immediately.
+
+    Returns 403 ``limit_exceeded`` if resuming would exceed the workspace's per-destination check budget.
+    """
     return _set_paused(monitor_id, False, p, db)
 
 

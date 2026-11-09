@@ -7,6 +7,7 @@ re-validates resolved addresses at connection time, which is authoritative.
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import urlsplit
 
 from probeatlas.common.netpolicy import BlockedTargetError, NetworkPolicy, validate_hostname
 from probeatlas.common.safehttp import validate_http_url
@@ -44,3 +45,8 @@ def normalize_target(check_type: CheckType, target: str, settings: dict[str, Any
         raise _invalid("target", f"target not allowed: {exc}") from exc
     except ValueError as exc:
         raise _invalid("target", str(exc)) from exc
+
+
+def destination_host(check_type: str, target: str) -> str:
+    """Return the host a monitor's checks are sent to: the URL's hostname for HTTP, else the target itself."""
+    return (urlsplit(target).hostname or "") if check_type == CheckType.HTTP else target.lower()

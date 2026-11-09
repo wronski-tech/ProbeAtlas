@@ -212,3 +212,58 @@ def test_invitations_need_the_invitees_consent_and_do_not_reveal_accounts(client
     pending = account.get("/v1/invitations").json()
     assert [i["email"] for i in pending] == ["nobody@example.com"]  # accepted, revoked, expired are gone
     assert account.post("/v1/members", {"email": "carol@example.com"}).status_code == 405  # no direct adds
+
+
+def test_invite_only_signup_requires_a_matching_invitation(client, account, settings, db):
+    from probeatlas.server.models import Workspace
+
+    settings.set(registration="invite")
+
+    def register(email, **extra):
+        """Try to register ``email`` and return the response."""
+        return client.post("/v1/auth/register", json={"email": email, "password": "correct horse battery",
+                                                      "name": "New", **extra})
+
+    r = register("dave@example.com")
+    assert r.status_code == 403 and r.json()["error"]["code"] == "invitation_required"
+    token = account.post("/v1/invitations", {"email": "dave@example.com"}).json()["token"]
+    for wrong in ({"invitation_token": token, "email": "eve@example.com"}, {"invitation_token": "pai_nope"}):
+        r = register(**{"email": "dave@example.com", **wrong})
+        assert r.status_code == 403 and r.json()["error"]["code"] == "invalid_invitation"
+
+    # The invited email signs up straight into the inviting workspace, with no workspace of its own.
+    r = register("Dave@Example.com", invitation_token=token, workspace_name="should not exist")
+    assert r.status_code == 201, r.text
+    assert [(w["id"], w["role"]) for w in r.json()["workspaces"]] == [(account.workspace_id, "member")]
+    assert db.execute(select(Workspace).where(Workspace.name == "should not exist")).first() is None
+    # The invitation is used up.
+    assert register("dave@example.com", invitation_token=token).json()["error"]["code"] == "invalid_invitation"
+    assert account.get("/v1/invitations").json() == []
+
+
+def test_operator_onboards_a_customer_with_an_owner_invitation(client, settings, db):
+    import pytest
+    from pydantic import ValidationError
+
+    from probeatlas.server.admin import create_workspace
+
+    settings.set(registration="invite")
+    with pytest.raises(ValidationError):
+        create_workspace(db, "Acme", "not-an-email")
+    out = create_workspace(db, "Acme", "Ops@Acme.example")
+    assert out["owner_email"] == "ops@acme.example" and out["invite_path"] == f"/invite/{out['invitation_token']}"
+    r = client.post("/v1/auth/register", json={"email": "ops@acme.example", "password": "correct horse battery",
+                                               "name": "Ops", "invitation_token": out["invitation_token"]})
+    assert r.status_code == 201, r.text
+    assert [(w["id"], w["name"], w["role"]) for w in r.json()["workspaces"]] == [
+        (out["workspace_id"], "Acme", "owner")]
+
+
+def test_bootstrap_enrollment_token_is_refused_in_production(settings):
+    import pytest
+
+    from probeatlas.server.main import bootstrap_enrollment_token
+
+    settings.set(env="production")
+    with pytest.raises(SystemExit, match="local development only"):
+        bootstrap_enrollment_token()

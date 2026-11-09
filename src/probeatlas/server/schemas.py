@@ -58,12 +58,18 @@ def decode_cursor(cursor: str) -> list[str]:
 
 
 class RegisterRequest(BaseModel):
-    """Create an account and its first workspace. Passwords must be 10-256 characters."""
+    """Create an account. Passwords must be 10-256 characters.
+
+    With ``invitation_token`` the account joins the inviting workspace (the invitation must be pending and
+    addressed to ``email``) and ``workspace_name`` is ignored. Without it, a new workspace is created; that
+    is only allowed when the server runs with open registration.
+    """
 
     email: EmailStr
     password: str = Field(min_length=10, max_length=256)
     name: str = Field(min_length=1, max_length=100)
     workspace_name: str = Field(default="My workspace", min_length=1, max_length=100)
+    invitation_token: str | None = Field(default=None, max_length=200)
 
 
 class LoginRequest(BaseModel):
