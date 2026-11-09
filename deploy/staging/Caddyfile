@@ -1,0 +1,36 @@
+# TLS termination and routing for the ProbeAtlas control plane (see compose.yml).
+# Certificates come from Let's Encrypt automatically once DNS points both names at this host.
+# Caddy ignores X-Forwarded-For from clients and sets it to the real client address, which the web
+# server and API trust only from this proxy (PROBEATLAS_TRUSTED_PROXIES, PROBEATLAS_WEB_TRUSTED_PROXY_HOPS).
+{
+	email {$PROBEATLAS_ACME_EMAIL}
+}
+
+(common) {
+	encode zstd gzip
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		Referrer-Policy "same-origin"
+		-Server
+	}
+	log
+}
+
+# Dashboard.
+{$PROBEATLAS_APP_DOMAIN} {
+	import common
+	request_body {
+		max_size 1MB
+	}
+	reverse_proxy web:3000
+}
+
+# Public REST API (/v1), agent protocol (/agent/v1), OpenAPI docs, and health checks.
+{$PROBEATLAS_API_DOMAIN} {
+	import common
+	# Agents submit at most 200 results per request; this leaves ample room and bounds abuse.
+	request_body {
+		max_size 2MB
+	}
+	reverse_proxy api:8000
+}

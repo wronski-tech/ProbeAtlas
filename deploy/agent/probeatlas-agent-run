@@ -1,0 +1,23 @@
+#!/bin/sh
+# probeatlas-agent-run [IMAGE TAG]: start, or upgrade, the ProbeAtlas agent container on this host.
+#
+# Settings come from /etc/probeatlas/agent.env (mode 0600); the image from /etc/probeatlas/agent-image.env.
+# The agent keeps its identity in the probeatlas-agent volume, so upgrades never re-enroll.
+set -eu
+. /etc/probeatlas/agent-image.env
+tag=${1:-$PROBEATLAS_TAG}
+image="$PROBEATLAS_IMAGE_REPO/probeatlas-agent:$tag"
+
+docker pull "$image"
+# SIGTERM first: the agent stops claiming, finishes in-flight checks, and flushes results (up to 30 s).
+docker stop --time 45 probeatlas-agent >/dev/null 2>&1 || true
+docker rm probeatlas-agent >/dev/null 2>&1 || true
+docker run -d --name probeatlas-agent --restart unless-stopped \
+  --env-file /etc/probeatlas/agent.env \
+  --cap-drop ALL --read-only --security-opt no-new-privileges:true \
+  --sysctl net.ipv4.ping_group_range="0 2147483647" \
+  --log-opt max-size=20m --log-opt max-file=5 \
+  -v probeatlas-agent:/var/lib/probeatlas-agent \
+  "$image"
+sed -i "s/^PROBEATLAS_TAG=.*/PROBEATLAS_TAG=$tag/" /etc/probeatlas/agent-image.env
+echo "agent running $image"

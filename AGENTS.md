@@ -14,7 +14,7 @@ operator-placed agents. Read this file before changing code. Human-oriented docs
 | `src/probeatlas/cli/` | `probeatlas` CLI (JSON output) |
 | `web/` | Next.js 16 dashboard; talks to the API only through `web/src/app/api/proxy` with an httpOnly session cookie |
 | `tests/` | pytest against real PostgreSQL; local HTTP/DNS servers, never public endpoints |
-| `deploy/` | Dockerfiles, demo target, `backup/pgbackup.sh` |
+| `deploy/` | Dockerfiles, demo target, `backup/pgbackup.sh`; staging: `staging/` (control-plane compose, Caddyfile, host scripts, cloud-init), `agent/` (agent cloud-init and run script), `terraform/staging/` (AWS, Azure, GCP, OVHcloud) — runbook in `docs/staging.md` |
 | `docs/` | Architecture, security, threat model and review, API, operations, backups, Terraform design |
 | `scripts/check_docstrings.py` | Fails CI if any Python def/class/module or TS function/class lacks documentation |
 

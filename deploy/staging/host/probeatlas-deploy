@@ -1,0 +1,32 @@
+#!/bin/sh
+# probeatlas-deploy <commit SHA>: deploy, or upgrade to, one commit of ProbeAtlas on the control-plane host.
+#
+# Fetches that commit's deploy files (compose.yml, Caddyfile, pgbackup.sh) from GitHub, refreshes the
+# settings file, and starts the images CI published for the same commit (migrations run first). Rolling
+# back is deploying an older SHA, as long as no migration since then must be reverted.
+set -eu
+PATH=/snap/bin:/usr/local/bin:/usr/bin:/bin
+. /etc/probeatlas/host.env
+
+sha=${1:-}
+if [ "${#sha}" -ne 40 ] || [ -n "$(printf '%s' "$sha" | tr -d '0-9a-f')" ]; then
+  echo "usage: probeatlas-deploy <full 40-character commit SHA>" >&2
+  exit 2
+fi
+
+cd /opt/probeatlas
+base="https://raw.githubusercontent.com/$PROBEATLAS_GITHUB_REPO/$sha"
+for path in deploy/staging/compose.yml deploy/staging/Caddyfile deploy/backup/pgbackup.sh; do
+  curl -fsSL --retry 3 "$base/$path" -o "$(basename "$path").new"
+done
+for f in compose.yml Caddyfile pgbackup.sh; do mv "$f.new" "$f"; done
+chmod 0755 pgbackup.sh
+
+/usr/local/bin/probeatlas-render-env
+# Record the tag in .env so plain `docker compose ...` (logs, exec probeatlas-admin) works in this directory.
+sed -i '/^PROBEATLAS_TAG=/d' .env
+echo "PROBEATLAS_TAG=$sha" >> .env
+docker compose up -d --remove-orphans --wait --wait-timeout 300
+# Pick up Caddyfile changes (a running Caddy does not re-read its bind-mounted config on its own).
+docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile
+echo "deployed $sha"

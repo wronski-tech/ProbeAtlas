@@ -1,0 +1,7 @@
+# Copy to backend.hcl (git-ignored) and run `terraform init -backend-config=backend.hcl`.
+# Create the bucket once by hand: private, versioned, default encryption on.
+bucket       = "probeatlas-terraform-state-<account-id>"
+key          = "staging/terraform.tfstate"
+region       = "eu-central-1"
+encrypt      = true
+use_lockfile = true

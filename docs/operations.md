@@ -125,6 +125,9 @@ In compose, the `migrate` one-shot service runs before `api` and `worker` start.
 
 ## Deployment (initial production)
 
+The staging environment (AWS control plane, agents on Azure, AWS, GCP, and OVHcloud) is fully scripted:
+see [staging.md](staging.md). The settings below apply to any deployment.
+
 A small deployment needs: managed PostgreSQL 16, one or two API containers,
 one worker container (more are safe), the web container, and agents in each
 region. Put the API and web behind a TLS-terminating load balancer.

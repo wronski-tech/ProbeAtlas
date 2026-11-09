@@ -1,0 +1,102 @@
+# ProbeAtlas control plane for staging (and small production): Caddy (TLS) + web + API + worker on one
+# host. PostgreSQL is external (managed, e.g. AWS RDS); agents run elsewhere. Runbook: docs/staging.md.
+#
+#   probeatlas-deploy <full commit SHA>     # on the host: deploy or upgrade (migrations run first)
+#
+# Expected files:
+#   .env next to this file (compose variables): PROBEATLAS_TAG (written by probeatlas-deploy),
+#     PROBEATLAS_APP_DOMAIN, PROBEATLAS_API_DOMAIN, PROBEATLAS_ACME_EMAIL, optionally PROBEATLAS_IMAGE_REPO.
+#   /etc/probeatlas/control-plane.env (mode 0600): PROBEATLAS_* server settings including
+#     PROBEATLAS_DATABASE_URL. Only the server containers read it; Caddy and web never see it.
+
+name: probeatlas
+
+x-server: &server
+  image: ${PROBEATLAS_IMAGE_REPO:-ghcr.io/wronski-tech}/probeatlas-server:${PROBEATLAS_TAG:?set PROBEATLAS_TAG to a commit SHA}
+  env_file: ${PROBEATLAS_ENV_FILE:-/etc/probeatlas/control-plane.env}
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  restart: unless-stopped
+  logging: &logging
+    driver: json-file
+    options: { max-size: "20m", max-file: "5" }
+
+services:
+  migrate:
+    <<: *server
+    command: ["probeatlas-admin", "migrate"]
+    restart: "no"
+    networks: [control]
+
+  api:
+    <<: *server
+    command: ["probeatlas-api"]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+    # Not published: Caddy is the only way in. Metrics (9101) are reachable from this host only.
+    ports: ["127.0.0.1:9101:9101"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/readyz')"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    networks: [control]
+
+  worker:
+    <<: *server
+    command: ["probeatlas-worker"]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+    ports: ["127.0.0.1:9100:9100"]
+    networks: [control]
+
+  web:
+    image: ${PROBEATLAS_IMAGE_REPO:-ghcr.io/wronski-tech}/probeatlas-web:${PROBEATLAS_TAG:?set PROBEATLAS_TAG to a commit SHA}
+    environment:
+      PROBEATLAS_API_URL: http://api:8000
+      # Caddy is the one proxy in front of the web server; it sets X-Forwarded-For to the client address.
+      PROBEATLAS_WEB_TRUSTED_PROXY_HOPS: "1"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs: ["/tmp", "/app/.next/cache:uid=1000,gid=1000"]
+    restart: unless-stopped
+    logging: *logging
+    depends_on:
+      api: { condition: service_healthy }
+    networks:
+      # Fixed address: PROBEATLAS_TRUSTED_PROXIES lets this address (and Caddy's) set X-Forwarded-For.
+      control: { ipv4_address: 10.203.30.30 }
+
+  caddy:
+    image: caddy:2-alpine
+    environment:
+      PROBEATLAS_APP_DOMAIN: ${PROBEATLAS_APP_DOMAIN:?set PROBEATLAS_APP_DOMAIN}
+      PROBEATLAS_API_DOMAIN: ${PROBEATLAS_API_DOMAIN:?set PROBEATLAS_API_DOMAIN}
+      PROBEATLAS_ACME_EMAIL: ${PROBEATLAS_ACME_EMAIL:?set PROBEATLAS_ACME_EMAIL}
+    ports: ["80:80", "443:443", "443:443/udp"]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    # Lets `docker compose up --wait` (probeatlas-deploy) fail when Caddy cannot load its config.
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:2019/config/"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+    logging: *logging
+    depends_on: [web, api]
+    networks:
+      control: { ipv4_address: 10.203.30.10 }
+
+volumes:
+  caddy-data: {}
+  caddy-config: {}
+
+networks:
+  control:
+    ipam:
+      config: [{ subnet: 10.203.30.0/24 }]

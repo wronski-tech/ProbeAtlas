@@ -1,0 +1,35 @@
+#!/bin/sh
+# probeatlas-backup [drill]: back up the control-plane database to S3, or run a restore drill.
+#
+#   probeatlas-backup         # dump (verified) -> s3://$PROBEATLAS_BACKUP_BUCKET/daily/, keep 7 days locally
+#   probeatlas-backup drill   # dump, restore into a scratch database, compare row counts, drop it
+#
+# Runs deploy/backup/pgbackup.sh in a postgres:16 container (client tools match the server's major
+# version). Scheduled daily by probeatlas-backup.timer.
+set -eu
+PATH=/snap/bin:/usr/local/bin:/usr/bin:/bin
+. /etc/probeatlas/host.env
+umask 077
+
+dir=/var/backups/probeatlas
+mkdir -p "$dir"
+envfile=$(mktemp)
+trap 'rm -f "$envfile"' EXIT
+# libpq does not understand SQLAlchemy's driver suffix. Passed in a file, not argv, so `ps` cannot show it.
+sed -n 's/^PROBEATLAS_DATABASE_URL=postgresql+psycopg:/PGURL=postgresql:/p' \
+  /etc/probeatlas/control-plane.env > "$envfile"
+
+run() {
+  docker run --rm --env-file "$envfile" -v /opt/probeatlas/pgbackup.sh:/pgbackup.sh:ro \
+    -v "$dir":/backups postgres:16 bash /pgbackup.sh "$@"
+}
+
+if [ "${1:-}" = drill ]; then
+  run drill /backups
+  exit
+fi
+file=$(run backup /backups | tail -n 1)
+aws s3 cp --only-show-errors --region "$PROBEATLAS_BACKUP_REGION" "$dir/$(basename "$file")" \
+  "s3://$PROBEATLAS_BACKUP_BUCKET/daily/"
+find "$dir" -name 'probeatlas-*.dump' -mtime +7 -delete
+echo "uploaded $(basename "$file")"

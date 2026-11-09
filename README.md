@@ -171,7 +171,8 @@ src/probeatlas/agent/    agent runner, control-plane client, checks/{http,dns,tc
 src/probeatlas/server/   API routers, auth, scheduling, ingestion, alerting, stats, worker
 src/probeatlas/cli/      CLI
 web/                     Next.js dashboard
-deploy/                  Dockerfiles, the demo target, and backup/pgbackup.sh
+deploy/                  Dockerfiles, demo target, backup/pgbackup.sh, and staging deployment
+                         (staging/, agent/, terraform/staging/; runbook: docs/staging.md)
 tests/                   pytest suite (real PostgreSQL, local test servers)
 docs/                    architecture, security, threat model, API, operations, backups, Terraform
 scripts/                 check_docstrings.py (documentation coverage, run in CI)

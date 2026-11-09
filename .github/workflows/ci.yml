@@ -1,5 +1,6 @@
-# Continuous integration: lint, documentation coverage, tests against real PostgreSQL, web checks, and
-# container builds. Runs on every push and pull request; no secrets or paid services are needed.
+# Continuous integration: lint, documentation coverage, tests against real PostgreSQL, web checks,
+# deployment config checks, and container builds. Runs on every push and pull request; no secrets or paid
+# services are needed. Pushes to main also publish the images to GHCR (built-in GITHUB_TOKEN).
 name: CI
 
 on:
@@ -75,16 +76,62 @@ jobs:
       - run: npm test
       - run: npm run build
 
+  deploy:
+    name: Deployment config (Terraform, scripts, compose)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+      - name: Terraform format and validate (no credentials, no backend)
+        working-directory: deploy/terraform/staging
+        run: |
+          terraform fmt -check -recursive
+          terraform init -backend=false -input=false
+          terraform validate
+      - name: Shell scripts
+        run: |
+          shellcheck --severity=warning -e SC1091 deploy/staging/host/probeatlas-deploy \
+            deploy/staging/host/probeatlas-render-env deploy/staging/host/probeatlas-backup \
+            deploy/agent/probeatlas-agent-run deploy/backup/pgbackup.sh
+      - name: Staging compose file
+        run: |
+          PROBEATLAS_TAG=0000000000000000000000000000000000000000 PROBEATLAS_APP_DOMAIN=app.example.com \
+          PROBEATLAS_API_DOMAIN=api.example.com PROBEATLAS_ACME_EMAIL=ops@example.com PROBEATLAS_ENV_FILE=/dev/null \
+            docker compose -f deploy/staging/compose.yml config -q
+
   images:
     name: Container images build
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # Only images whose code passed every check are published.
+    needs: [backend, web, deploy]
+    permissions:
+      contents: read
+      packages: write # push to GHCR (main only)
     steps:
       - uses: actions/checkout@v4
-      - run: docker build -f deploy/Dockerfile.server -t probeatlas-server:ci .
-      - run: docker build -f deploy/Dockerfile.agent -t probeatlas-agent:ci .
-      - run: docker build -t probeatlas-web:ci web
+      - name: Build
+        run: |
+          # Links each package to this repository on GHCR.
+          label="org.opencontainers.image.source=https://github.com/${{ github.repository }}"
+          docker build --label "$label" -f deploy/Dockerfile.server -t probeatlas-server:ci .
+          docker build --label "$label" -f deploy/Dockerfile.agent -t probeatlas-agent:ci .
+          docker build --label "$label" -t probeatlas-web:ci web
       - name: Agent image runs as non-root and starts
         run: |
           test "$(docker run --rm --entrypoint id probeatlas-agent:ci -u)" != "0"
           docker run --rm --entrypoint probeatlas-agent probeatlas-agent:ci 2>&1 | grep -q "PROBEATLAS_AGENT_REGION is required"
+      - name: Publish to GHCR (main only), tagged with the full commit SHA and "main"
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "$GH_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          registry="ghcr.io/$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')"
+          for name in server agent web; do
+            for tag in "$GITHUB_SHA" main; do
+              docker tag "probeatlas-$name:ci" "$registry/probeatlas-$name:$tag"
+              docker push --quiet "$registry/probeatlas-$name:$tag"
+            done
+          done

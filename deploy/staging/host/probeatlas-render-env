@@ -1,0 +1,13 @@
+#!/bin/sh
+# Write /etc/probeatlas/control-plane.env (mode 0600): the non-secret settings from settings.env plus the
+# database URL read from AWS SSM Parameter Store with the instance role. Run by probeatlas-deploy.
+set -eu
+PATH=/snap/bin:/usr/local/bin:/usr/bin:/bin
+. /etc/probeatlas/host.env
+umask 077
+
+url=$(aws ssm get-parameter --region "$AWS_REGION" --name "$PROBEATLAS_SSM_DATABASE_URL" \
+  --with-decryption --query Parameter.Value --output text)
+{ cat /etc/probeatlas/settings.env; printf 'PROBEATLAS_DATABASE_URL=%s\n' "$url"; } \
+  > /etc/probeatlas/control-plane.env.new
+mv /etc/probeatlas/control-plane.env.new /etc/probeatlas/control-plane.env

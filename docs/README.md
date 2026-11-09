@@ -6,6 +6,7 @@
 | Understand the processes, data flow, data model, and trade-offs | [architecture.md](architecture.md) |
 | Call the API or use the CLI | [api.md](api.md) · [openapi.json](openapi.json) · `/docs` on a running API |
 | Run agents, read metrics, understand recovery and retention, deploy | [operations.md](operations.md) |
+| Stand up staging (AWS control plane, agents on Azure, AWS, GCP, OVHcloud) | [staging.md](staging.md) |
 | Back up, restore, and run restore drills | [backup-restore.md](backup-restore.md) |
 | Understand the security controls | [security.md](security.md) |
 | See the threat model, review findings, and pen-test scope | [security-review.md](security-review.md) |

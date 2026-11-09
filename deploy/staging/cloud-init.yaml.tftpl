@@ -1,0 +1,65 @@
+#cloud-config
+# ProbeAtlas control-plane host (Ubuntu 24.04 on AWS EC2). Rendered by deploy/terraform/staging.
+# Installs Docker and the AWS CLI, writes non-secret settings and the host scripts, then deploys the
+# given commit. The database URL never appears here: probeatlas-render-env reads it from SSM at deploy time.
+package_update: true
+package_upgrade: true
+packages: [docker.io, docker-compose-v2, unattended-upgrades]
+snap:
+  commands:
+    - [snap, install, aws-cli, --classic]
+
+write_files:
+  - path: /etc/probeatlas/host.env
+    permissions: "0600"
+    content: |
+      AWS_REGION=${aws_region}
+      PROBEATLAS_SSM_DATABASE_URL=${ssm_database_url}
+      PROBEATLAS_BACKUP_BUCKET=${backup_bucket}
+      PROBEATLAS_BACKUP_REGION=${backup_region}
+      PROBEATLAS_GITHUB_REPO=${github_repo}
+  # Server settings without secrets; probeatlas-render-env appends PROBEATLAS_DATABASE_URL.
+  - path: /etc/probeatlas/settings.env
+    permissions: "0600"
+    content: |
+      PROBEATLAS_ENV=production
+      PROBEATLAS_REGISTRATION=invite
+      # Caddy (10.203.30.10) and the web server (10.203.30.30) may set X-Forwarded-For; see compose.yml.
+      PROBEATLAS_TRUSTED_PROXIES=10.203.30.10,10.203.30.30
+      PROBEATLAS_WEBHOOK_NAMESERVERS=1.1.1.1,8.8.8.8
+      PROBEATLAS_LOG_FORMAT=json
+      PROBEATLAS_LOG_LEVEL=INFO
+  # Compose variables (read automatically from /opt/probeatlas/.env).
+  - path: /opt/probeatlas/.env
+    permissions: "0644"
+    content: |
+      PROBEATLAS_APP_DOMAIN=${app_domain}
+      PROBEATLAS_API_DOMAIN=${api_domain}
+      PROBEATLAS_ACME_EMAIL=${acme_email}
+      PROBEATLAS_IMAGE_REPO=${image_repo}
+  - path: /usr/local/bin/probeatlas-deploy
+    permissions: "0755"
+    encoding: b64
+    content: ${deploy_b64}
+  - path: /usr/local/bin/probeatlas-render-env
+    permissions: "0755"
+    encoding: b64
+    content: ${render_env_b64}
+  - path: /usr/local/bin/probeatlas-backup
+    permissions: "0755"
+    encoding: b64
+    content: ${backup_b64}
+  - path: /etc/systemd/system/probeatlas-backup.service
+    permissions: "0644"
+    encoding: b64
+    content: ${backup_service_b64}
+  - path: /etc/systemd/system/probeatlas-backup.timer
+    permissions: "0644"
+    encoding: b64
+    content: ${backup_timer_b64}
+
+runcmd:
+  - [systemctl, enable, --now, docker]
+  - [systemctl, daemon-reload]
+  - [systemctl, enable, --now, probeatlas-backup.timer]
+  - [/usr/local/bin/probeatlas-deploy, "${image_tag}"]

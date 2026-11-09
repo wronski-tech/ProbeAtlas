@@ -1,0 +1,37 @@
+#cloud-config
+# ProbeAtlas measurement agent on Ubuntu 24.04, for any cloud provider. Rendered by
+# deploy/terraform/staging (templatefile); to use it by hand, replace each $${...} placeholder.
+#
+# The enrollment token must be single-use, region-bound, and short-lived
+# (probeatlas-admin create-enrollment-token --region <label> --max-uses 1): cloud consoles can show user
+# data, and after the first boot the agent authenticates with its own credential instead.
+# Location fields are operator assertions taken from the provider's documented region, never from IP data.
+package_update: true
+package_upgrade: true
+packages: [docker.io, unattended-upgrades]
+
+write_files:
+  - path: /etc/probeatlas/agent.env
+    permissions: "0600"
+    content: |
+      PROBEATLAS_API_URL=${api_url}
+      PROBEATLAS_AGENT_ENROLLMENT_TOKEN=${enrollment_token}
+      PROBEATLAS_AGENT_REGION=${region}
+      PROBEATLAS_AGENT_NAME=${name}
+      PROBEATLAS_AGENT_COUNTRY_CODE=${country_code}
+      PROBEATLAS_AGENT_CITY=${city}
+      PROBEATLAS_AGENT_PROVIDER=${network}
+      PROBEATLAS_AGENT_NAMESERVERS=${nameservers}
+  - path: /etc/probeatlas/agent-image.env
+    permissions: "0644"
+    content: |
+      PROBEATLAS_IMAGE_REPO=${image_repo}
+      PROBEATLAS_TAG=${image_tag}
+  - path: /usr/local/bin/probeatlas-agent-run
+    permissions: "0755"
+    encoding: b64
+    content: ${agent_run_b64}
+
+runcmd:
+  - [systemctl, enable, --now, docker]
+  - [/usr/local/bin/probeatlas-agent-run]

@@ -1,0 +1,20 @@
+# Copy to terraform.tfvars (git-ignored) and fill in. No secrets belong in this example.
+app_domain     = "app.staging.example.com"
+api_domain     = "api.staging.example.com"
+acme_email     = "ops@example.com"
+image_tag      = "0000000000000000000000000000000000000000" # full SHA of a main commit CI published
+ssh_public_key = "ssh-ed25519 AAAA... operator@laptop"
+operator_cidrs = ["203.0.113.10/32"] # or [] to keep SSH closed (AWS Session Manager still works)
+
+azure_subscription_id = "00000000-0000-0000-0000-000000000000"
+gcp_project           = "probeatlas-staging"
+
+# Phase 2: one single-use, region-bound token per agent, from the control plane:
+#   probeatlas-admin create-enrollment-token --region us-east --max-uses 1 --expires-in-hours 24
+# Prefer passing them via TF_VAR_agent_enrollment_tokens='{"us-east":"pae_..."}' instead of this file.
+# agent_enrollment_tokens = {
+#   "eu-west"      = "pae_..."
+#   "us-east"      = "pae_..."
+#   "ap-southeast" = "pae_..."
+#   "au-east"      = "pae_..."
+# }
