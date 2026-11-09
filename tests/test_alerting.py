@@ -207,3 +207,18 @@ def test_notification_channels_are_capped_per_workspace(account):
         assert r.status_code == 201, r.text
     r = account.post("/v1/notification-channels", {"name": "c10", "url": "https://hooks.example.com/10"})
     assert r.status_code == 403 and r.json()["error"]["code"] == "limit_exceeded"
+
+
+def test_webhook_urls_are_masked_for_everyone_but_owners(client, account):
+    from tests.conftest import Account
+
+    url = "https://hooks.example.com/services/T000/B000/s3cr3t-token?x=1"
+    assert account.post("/v1/notification-channels", {"name": "ops", "url": url}).status_code == 201
+    assert account.get("/v1/notification-channels").json()[0]["url"] == url
+    bob = Account(client, "bob@example.com")
+    account.invite(bob)
+    as_member = client.get("/v1/notification-channels",
+                           headers={"Authorization": f"Bearer {bob.token}", "X-Workspace-Id": account.workspace_id})
+    as_api_key = client.get("/v1/notification-channels", headers={"Authorization": f"Bearer {account.api_key()}"})
+    for r in (as_member, as_api_key):
+        assert r.status_code == 200 and r.json()[0]["url"] == "https://hooks.example.com/…"

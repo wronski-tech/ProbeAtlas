@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import socket
 import ssl
 import threading
@@ -12,13 +13,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import dns.message
 import dns.rcode
+import dns.rdatatype
 import dns.rrset
 import pytest
 
 from probeatlas.agent.checks import execute
 from probeatlas.agent.checks import icmp as icmp_mod
 from probeatlas.agent.checks.base import CheckContext
-from probeatlas.common.netpolicy import NetworkPolicy
+from probeatlas.common.netpolicy import BlockedTargetError, NetworkPolicy, ResolutionError, resolve_checked
 from probeatlas.common.schemas import CheckType, FailureCategory, JobSpec
 
 LOCAL = NetworkPolicy.from_cidrs("127.0.0.0/8,::1/128", allow_private_hostnames=True)
@@ -177,7 +179,7 @@ class FakeDNS:
     """Minimal UDP DNS server returning fixed answers."""
 
     def __init__(self, answers: dict[str, list[str]]):
-        """Start a UDP DNS server on localhost that answers A queries from ``answers``."""
+        """Start a UDP DNS server on localhost answering from ``{name: {record_type: [rdata, ...]}}``."""
         self.answers = answers
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.bind(("127.0.0.1", 0))
@@ -194,11 +196,13 @@ class FakeDNS:
                 return
             q = dns.message.from_wire(data)
             resp = dns.message.make_response(q)
-            name = q.question[0].name.to_text().rstrip(".")
-            if name in self.answers:
-                resp.answer.append(dns.rrset.from_text(q.question[0].name, 60, "IN", "A", *self.answers[name]))
-            else:
+            question = q.question[0]
+            name = question.name.to_text().rstrip(".")
+            rdtype = dns.rdatatype.to_text(question.rdtype)
+            if name not in self.answers:
                 resp.set_rcode(dns.rcode.NXDOMAIN)
+            elif rdtype in self.answers[name]:  # otherwise NOERROR with no answer, like a real server
+                resp.answer.append(dns.rrset.from_text(question.name, 60, "IN", rdtype, *self.answers[name][rdtype]))
             self.sock.sendto(resp.to_wire(), addr)
 
     def close(self):
@@ -209,7 +213,12 @@ class FakeDNS:
 @pytest.fixture
 def fake_dns(monkeypatch):
     """Point every new dnspython resolver at a :class:`FakeDNS` instance for this test."""
-    server = FakeDNS({"public.test": ["93.184.216.34"], "sneaky.test": ["93.184.216.34", "10.0.0.5"]})
+    server = FakeDNS({
+        "public.test": {"A": ["93.184.216.34"]},
+        "sneaky.test": {"A": ["93.184.216.34", "10.0.0.5"]},
+        "alias.test": {"CNAME": ["public.test."]},
+        "leaky.test": {"CNAME": ["db.corp.internal."], "MX": ["10 mail.lan."]},
+    })
     import dns.resolver
 
     original = dns.resolver.Resolver.__init__
@@ -239,6 +248,74 @@ def test_dns_answers_with_private_addresses_are_not_revealed(fake_dns):
     r = execute(job(CheckType.DNS, "sneaky.test", nameserver="127.0.0.1"), ctx(policy=policy))
     assert r.failure_category == FailureCategory.BLOCKED_TARGET
     assert "10.0.0.5" not in (r.error_message or "") and "answers" not in r.details
+
+
+def test_dns_cname_and_mx_answers_naming_internal_hosts_are_not_revealed(fake_dns):
+    policy = NetworkPolicy.from_cidrs("127.0.0.0/8")  # strict hostname rules; only the test nameserver allowed
+    ok = execute(job(CheckType.DNS, "alias.test", record_type="CNAME", nameserver="127.0.0.1"), ctx(policy=policy))
+    assert ok.success and ok.details["answers"] == ["public.test."]
+    for record_type in ("CNAME", "MX"):
+        r = execute(job(CheckType.DNS, "leaky.test", record_type=record_type, nameserver="127.0.0.1"),
+                    ctx(policy=policy))
+        assert r.failure_category == FailureCategory.BLOCKED_TARGET and not r.success
+        assert "corp" not in (r.error_message or "") and "lan" not in (r.error_message or "") and not r.details
+
+
+def test_dns_check_uses_the_agents_configured_resolvers(fake_dns):
+    # No customer nameserver: the agent's resolvers (PROBEATLAS_AGENT_NAMESERVERS) are used, not the host's.
+    policy = NetworkPolicy.from_cidrs("127.0.0.0/8", nameservers="127.0.0.1")
+    r = execute(job(CheckType.DNS, "public.test"), ctx(policy=policy))
+    assert r.success and r.details["answers"] == ["93.184.216.34"]
+
+
+def test_resolution_uses_policy_resolvers_and_checks_every_address(fake_dns):
+    policy = NetworkPolicy(nameservers=("127.0.0.1",))
+    public = [(socket.AF_INET, ipaddress.ip_address("93.184.216.34"))]
+    assert resolve_checked("public.test", policy, timeout_s=2) == public
+    with pytest.raises(BlockedTargetError):
+        resolve_checked("sneaky.test", policy, timeout_s=2)  # one private answer rejects the whole name
+    with pytest.raises(ResolutionError) as missing:
+        resolve_checked("missing.test", policy, timeout_s=2)
+    assert missing.value.nxdomain
+
+
+def test_unresponsive_nameservers_cannot_delay_other_lookups(fake_dns, monkeypatch):
+    # A tenant can point targets at zones whose nameservers never answer. Each lookup must give up at its own
+    # deadline without holding shared resources, so lookups for other targets stay fast.
+    hole = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    hole.bind(("127.0.0.2", 0))  # receives queries, never answers
+    import dns.resolver
+
+    init_with_fake_port = dns.resolver.Resolver.__init__
+
+    def init(self, *a, **kw):
+        """Use the fake server for 127.0.0.1 and the black hole for 127.0.0.2."""
+        init_with_fake_port(self, *a, **kw)
+        self.nameserver_ports = {"127.0.0.2": hole.getsockname()[1]}
+
+    monkeypatch.setattr(dns.resolver.Resolver, "__init__", init)
+    hung: list[tuple[bool, float]] = []
+
+    def lookup_black_hole():
+        """Resolve through the black hole and record whether it timed out and how long it took."""
+        start = time.monotonic()
+        try:
+            resolve_checked("slow.test", NetworkPolicy(nameservers=("127.0.0.2",)), timeout_s=1.0)
+        except ResolutionError as exc:
+            hung.append((exc.timeout, time.monotonic() - start))
+
+    threads = [threading.Thread(target=lookup_black_hole) for _ in range(100)]
+    for t in threads:
+        t.start()
+    time.sleep(0.1)
+    start = time.monotonic()
+    addrs = resolve_checked("public.test", NetworkPolicy(nameservers=("127.0.0.1",)), timeout_s=1.0)
+    fast = time.monotonic() - start
+    for t in threads:
+        t.join()
+    hole.close()
+    assert addrs == [(socket.AF_INET, ipaddress.ip_address("93.184.216.34"))] and fast < 0.5
+    assert len(hung) == 100 and all(timed_out and elapsed < 1.8 for timed_out, elapsed in hung)
 
 
 def test_dns_nameserver_must_pass_policy():

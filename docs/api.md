@@ -24,7 +24,8 @@ Base URL: `http://localhost:8000` locally. Interactive documentation is served a
 | Area | Endpoints |
 | --- | --- |
 | Auth | `POST /v1/auth/register`, `POST /v1/auth/login`, `POST /v1/auth/logout`, `GET /v1/auth/me` |
-| Workspaces | `GET/POST /v1/workspaces`, `GET/POST /v1/members`, `DELETE /v1/members/{user_id}` |
+| Workspaces | `GET/POST /v1/workspaces`, `GET /v1/members`, `DELETE /v1/members/{user_id}` |
+| Invitations | `GET/POST /v1/invitations`, `DELETE /v1/invitations/{id}` (owner session), `POST /v1/invitations/accept` (invitee's session) |
 | API keys (owner session) | `GET/POST /v1/api-keys`, `DELETE /v1/api-keys/{id}`, `POST /v1/api-keys/{id}/rotate` |
 | Monitors | `GET/POST /v1/monitors`, `GET/PATCH/DELETE /v1/monitors/{id}`, `POST /v1/monitors/{id}/pause`, `POST /v1/monitors/{id}/resume` |
 | Analytics | `GET /v1/monitors/{id}/regional-performance`, `GET /v1/monitors/{id}/timeseries`, `GET /v1/monitors/{id}/events`, `GET /v1/overview` |
@@ -34,7 +35,7 @@ Base URL: `http://localhost:8000` locally. Interactive documentation is served a
 | Notifications | `GET/POST /v1/notification-channels`, `PATCH/DELETE /v1/notification-channels/{id}`, `POST /v1/notification-channels/{id}/test`, `GET /v1/notification-deliveries` |
 | Audit (owner) | `GET /v1/audit-events` |
 | Agent protocol | `POST /agent/v1/register`, `/heartbeat`, `/jobs/claim`, `/results` (agent tokens only) |
-| Ops | `GET /healthz`, `GET /readyz`, `GET /metrics` |
+| Ops | `GET /healthz`, `GET /readyz` (Prometheus metrics are on the internal port `PROBEATLAS_API_METRICS_PORT`, default 9101, not on the API port) |
 
 ## Examples
 
@@ -141,3 +142,25 @@ Reject requests whose timestamp is more than a few minutes old to prevent replay
 `connection_reset`, `network_unreachable`, `tls_error`, `tls_certificate`,
 `protocol_error`, `http_status`, `redirect_limit`, `packet_loss`,
 `blocked_target`, `unsupported`, `internal_error`.
+
+## Inviting members
+
+Membership needs the invitee's consent. An owner creates an invitation and shares the one-time token
+(the dashboard shows a `/invite/<token>` link); the invitee accepts while signed in with the invited email.
+
+```bash
+# Owner (session token + workspace header)
+curl -s -X POST $API/v1/invitations -H "Authorization: Bearer $OWNER_SESSION" \
+  -H "X-Workspace-Id: $WS" -H 'Content-Type: application/json' \
+  -d '{"email": "bob@example.com", "role": "member"}'
+# -> {"id": "...", "email": "bob@example.com", "role": "member", "expires_at": "...", "token": "pai_..."}
+
+# Invitee (their own session token)
+curl -s -X POST $API/v1/invitations/accept -H "Authorization: Bearer $BOB_SESSION" \
+  -H 'Content-Type: application/json' -d '{"token": "pai_..."}'
+```
+
+The create response is the same whether or not the email has an account. Unknown, expired, revoked,
+already-used, and wrong-account tokens all return `404 not_found`. Invitations expire after 7 days.
+`GET /v1/notification-channels` returns full webhook URLs only to owners; members and API keys see
+`scheme://host/…`.

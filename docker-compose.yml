@@ -19,6 +19,8 @@ x-server-env: &server-env
   PROBEATLAS_MIN_INTERVAL_SECONDS: "10"
   PROBEATLAS_WEBHOOK_ALLOWED_PRIVATE_CIDRS: ${PROBEATLAS_WEBHOOK_ALLOWED_PRIVATE_CIDRS:-}
   PROBEATLAS_LOG_LEVEL: INFO
+  # Only the web server (fixed address below) may tell the API which browser IP a request came from.
+  PROBEATLAS_TRUSTED_PROXIES: 10.203.20.30
 
 x-server-image: &server-image
   build: { context: ., dockerfile: deploy/Dockerfile.server }
@@ -65,7 +67,8 @@ services:
     <<: *server-image
     command: ["probeatlas-api"]
     environment: *server-env
-    ports: ["8000:8000"]
+    # 9101 serves Prometheus metrics; it is internal-only (localhost here, private network in production).
+    ports: ["8000:8000", "127.0.0.1:9101:9101"]
     depends_on:
       migrate: { condition: service_completed_successfully }
     healthcheck:
@@ -91,11 +94,15 @@ services:
     image: probeatlas-web:dev
     environment:
       PROBEATLAS_API_URL: http://api:8000
+      # Browsers connect directly here, so X-Forwarded-For cannot be trusted (0). Behind a TLS load
+      # balancer that appends to X-Forwarded-For, set 1.
+      PROBEATLAS_WEB_TRUSTED_PROXY_HOPS: ${PROBEATLAS_WEB_TRUSTED_PROXY_HOPS:-0}
     ports: ["3000:3000"]
     depends_on:
       api: { condition: service_healthy }
     restart: unless-stopped
-    networks: [control]
+    networks:
+      control: { ipv4_address: 10.203.20.30 }
 
   agent-a:
     <<: *agent
@@ -135,7 +142,9 @@ services:
       targets: { ipv4_address: 10.203.10.100 }
 
 networks:
-  control: {}
+  control:
+    ipam:
+      config: [{ subnet: 10.203.20.0/24 }]
   targets:
     ipam:
       config: [{ subnet: 10.203.10.0/24 }]

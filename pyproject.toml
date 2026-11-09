@@ -9,14 +9,14 @@ description = "ProbeAtlas: developer-first global internet infrastructure monito
 requires-python = ">=3.11"
 readme = "README.md"
 license = { text = "Proprietary" }
-# The shared wire schema and network policy only need pydantic.
-dependencies = ["pydantic>=2.7,<3"]
+# The shared wire schema needs pydantic; the network policy resolves with dnspython (hard timeouts).
+dependencies = ["pydantic>=2.7,<3", "dnspython>=2.6"]
 
 [project.optional-dependencies]
 # Control plane: API, scheduler, ingestion, alerting.
 server = [
   "fastapi>=0.115",
-  "uvicorn[standard]>=0.30",
+  "uvicorn[standard]>=0.31.1",  # trusted proxy CIDRs + rightmost untrusted X-Forwarded-For
   "sqlalchemy>=2.0.30,<2.2",
   "psycopg[binary]>=3.2",
   "alembic>=1.13",

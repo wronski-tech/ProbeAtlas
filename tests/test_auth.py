@@ -86,7 +86,7 @@ def test_member_role_cannot_perform_owner_actions(client, account):
     from tests.conftest import Account
 
     bob = Account(client, "bob@example.com")
-    assert account.post("/v1/members", {"email": "bob@example.com"}).status_code == 201
+    account.invite(bob)
     bob_in_alice = {"Authorization": f"Bearer {bob.token}", "X-Workspace-Id": account.workspace_id}
     assert client.get("/v1/monitors", headers=bob_in_alice).status_code == 200
     assert client.post("/v1/api-keys", headers=bob_in_alice, json={"name": "x"}).status_code == 403
@@ -103,6 +103,35 @@ def test_auth_endpoints_are_rate_limited(client, settings):
     assert codes[:3] == [401, 401, 401] and codes[3] == 429
     r = client.post("/v1/auth/login", json={"email": "x@example.com", "password": "whatever123"})
     assert r.json()["error"]["code"] == "rate_limited" and int(r.headers["Retry-After"]) >= 1
+
+
+def test_forwarded_client_ip_is_used_only_from_trusted_proxies(settings, db):
+    from fastapi.testclient import TestClient
+
+    from probeatlas.server.main import create_app
+
+    def failed_logins(client, ip, n):
+        """Send ``n`` failed logins that claim to come from ``ip`` and return the status codes."""
+        return [client.post("/v1/auth/login", headers={"X-Forwarded-For": ip},
+                            json={"email": "x@example.com", "password": "whatever123"}).status_code
+                for _ in range(n)]
+
+    settings.set(auth_rate_limit_per_minute=3, trusted_proxies="")
+    with TestClient(create_app()) as direct:
+        # Untrusted peers cannot pick a fresh rate-limit bucket by inventing X-Forwarded-For values.
+        assert failed_logins(direct, "203.0.113.7", 3) == [401, 401, 401]
+        assert failed_logins(direct, "198.51.100.9", 1) == [429]
+
+    from probeatlas.server.ratelimit import limiter
+
+    limiter.reset()
+    settings.set(trusted_proxies="testclient")  # the TestClient peer plays the web server / load balancer
+    with TestClient(create_app()) as behind_proxy:
+        # One client's failures no longer lock out everyone behind the same proxy.
+        assert failed_logins(behind_proxy, "203.0.113.7", 4) == [401, 401, 401, 429]
+        assert failed_logins(behind_proxy, "198.51.100.9", 1) == [401]
+    ips = db.execute(text("SELECT DISTINCT ip FROM audit_events WHERE action = 'user.login_failed'")).scalars()
+    assert set(ips) == {"testclient", "203.0.113.7", "198.51.100.9"}
 
 
 def test_workspace_api_rate_limit(client, account, settings):
@@ -129,3 +158,57 @@ def test_secrets_are_redacted_from_log_messages_and_structured_fields():
     out = json.loads(JsonFormatter("api").format(record))
     assert key not in json.dumps(out)
     assert out["msg"] == "rejected [REDACTED]" and out["count"] == 3
+
+
+def test_invitations_need_the_invitees_consent_and_do_not_reveal_accounts(client, account, db):
+    from datetime import timedelta
+
+    from tests.conftest import Account
+
+    bob = Account(client, "bob@example.com")
+    carol = Account(client, "carol@example.com")
+    bob_auth = {"Authorization": f"Bearer {bob.token}"}
+
+    # Same response for a registered and an unregistered email: invitations cannot enumerate accounts.
+    for_bob = account.post("/v1/invitations", {"email": "Bob@Example.com"})
+    for_nobody = account.post("/v1/invitations", {"email": "nobody@example.com"})
+    assert for_bob.status_code == for_nobody.status_code == 201
+    assert set(for_bob.json()) == set(for_nobody.json())
+    token = for_bob.json()["token"]
+    assert token.startswith("pai_")
+
+    # Nothing changes for Bob until he accepts.
+    assert [w["id"] for w in client.get("/v1/workspaces", headers=bob_auth).json()] == [bob.workspace_id]
+    assert len(account.get("/v1/members").json()) == 1
+
+    # Only the invited account can accept, and only once.
+    wrong = client.post("/v1/invitations/accept", json={"token": token},
+                        headers={"Authorization": f"Bearer {carol.token}"})
+    assert wrong.status_code == 404
+    ok = client.post("/v1/invitations/accept", json={"token": token}, headers=bob_auth)
+    assert ok.status_code == 200 and ok.json()["id"] == account.workspace_id and ok.json()["role"] == "member"
+    assert client.post("/v1/invitations/accept", json={"token": token}, headers=bob_auth).status_code == 404
+    assert {m["email"] for m in account.get("/v1/members").json()} == {"alice@example.com", "bob@example.com"}
+    # His own workspace stays first, so signing in does not drop him into someone else's workspace.
+    assert client.get("/v1/workspaces", headers=bob_auth).json()[0]["id"] == bob.workspace_id
+
+    # Revoked and expired invitations cannot be used; API keys cannot accept on anyone's behalf.
+    def accept_as(auth, invitation):
+        """Try to accept ``invitation`` with the given Authorization header and return the status code."""
+        return client.post("/v1/invitations/accept", json={"token": invitation["token"]}, headers=auth).status_code
+
+    carol_auth = {"Authorization": f"Bearer {carol.token}"}
+    revoked = account.post("/v1/invitations", {"email": "carol@example.com"}).json()
+    assert account.delete(f"/v1/invitations/{revoked['id']}").status_code == 204
+    assert accept_as(carol_auth, revoked) == 404
+    expired = account.post("/v1/invitations", {"email": "carol@example.com"}).json()
+    db.execute(text("UPDATE invitations SET expires_at = now() - :d WHERE id = :id"),
+               {"d": timedelta(seconds=1), "id": expired["id"]})
+    db.commit()
+    assert accept_as(carol_auth, expired) == 404
+    key_auth = {"Authorization": f"Bearer {carol.api_key()}"}
+    assert accept_as(key_auth, expired) == 403
+
+    pending = account.get("/v1/invitations").json()
+    assert [i["email"] for i in pending] == ["nobody@example.com"]  # accepted, revoked, expired are gone
+    assert account.post("/v1/members", {"email": "carol@example.com"}).status_code == 405  # no direct adds

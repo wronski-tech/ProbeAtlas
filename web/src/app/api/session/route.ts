@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { API_URL, SESSION_COOKIE, WORKSPACE_COOKIE, backend, cookieOptions } from "@/lib/server";
+import { API_URL, SESSION_COOKIE, WORKSPACE_COOKIE, backend, cookieOptions, forwardingHeaders } from "@/lib/server";
 
 /** Reject requests without the CSRF header, which cross-site forms and simple requests cannot send. */
 function csrfRejected(req: NextRequest) {
@@ -19,7 +19,8 @@ export async function POST(req: NextRequest) {
   const { action: _ignored, ...payload } = body;
   const res = await fetch(`${API_URL}/v1/auth/${action}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    // Login/registration are rate limited per client IP: forward the browser's address, not ours.
+    headers: { "Content-Type": "application/json", ...(await forwardingHeaders()) },
     body: JSON.stringify(payload),
   });
   const data = await res.json();

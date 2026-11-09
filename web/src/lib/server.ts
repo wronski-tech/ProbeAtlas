@@ -1,8 +1,11 @@
-import { cookies } from "next/headers";
+import { cookies, headers as requestHeaders } from "next/headers";
+import { clientIpFromForwardedFor } from "./proxy";
 
 export const API_URL = process.env.PROBEATLAS_API_URL ?? "http://localhost:8000";
 export const SESSION_COOKIE = "pa_session";
 export const WORKSPACE_COOKIE = "pa_workspace";
+/** Reverse proxies in front of this server that append to X-Forwarded-For (0 = browsers connect directly). */
+const TRUSTED_PROXY_HOPS = Number(process.env.PROBEATLAS_WEB_TRUSTED_PROXY_HOPS ?? "0");
 
 export type Workspace = { id: string; name: string; role: string | null };
 export type Me = { user: { id: string; email: string; name: string }; workspaces: Workspace[] };
@@ -15,12 +18,23 @@ export const cookieOptions = {
   path: "/",
 };
 
+/**
+ * Headers that tell the API who the browser is: `X-Forwarded-For` with the client IP when it can be
+ * trusted. The API honors it only from addresses in `PROBEATLAS_TRUSTED_PROXIES`, so per-IP rate limits and
+ * audit events see the real client instead of this server.
+ */
+export async function forwardingHeaders(): Promise<Record<string, string>> {
+  const ip = clientIpFromForwardedFor((await requestHeaders()).get("x-forwarded-for"), TRUSTED_PROXY_HOPS);
+  return ip ? { "X-Forwarded-For": ip } : {};
+}
+
 /** Server-side call to the control plane using the caller's session cookie. */
 export async function backend(path: string, init: RequestInit = {}): Promise<Response> {
   const jar = await cookies();
   const token = jar.get(SESSION_COOKIE)?.value;
   const workspace = jar.get(WORKSPACE_COOKIE)?.value;
   const headers = new Headers(init.headers);
+  for (const [k, v] of Object.entries(await forwardingHeaders())) headers.set(k, v);
   if (token) headers.set("Authorization", `Bearer ${token}`);
   if (workspace) headers.set("X-Workspace-Id", workspace);
   return fetch(`${API_URL}${path}`, { ...init, headers, cache: "no-store" });

@@ -31,7 +31,8 @@ export async function api<T>(path: string, init: { method?: string; body?: unkno
     body: init.body === undefined ? undefined : JSON.stringify(init.body),
   });
   if (res.status === 401) {
-    window.location.href = "/login";
+    // Come back to this page (for example an invitation link) after signing in.
+    window.location.href = `/login?next=${encodeURIComponent(window.location.pathname + window.location.search)}`;
     throw new ApiError(401, "unauthorized", "session expired");
   }
   if (res.status === 204) return undefined as T;

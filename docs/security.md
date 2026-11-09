@@ -25,10 +25,20 @@ SIIT, 6to4, Teredo, NAT64 (well-known and local-use) forms, and site-local `fec0
 100.100.100.200, fd00:ec2::254, …) are blocked **even if** an operator
 allowlists their range.
 
-DNS checks do not connect to the target, but A/AAAA answers that point at
-blocked ranges are reported as `blocked_target` without revealing the
-addresses, so DNS checks cannot map internal networks. Custom nameservers must
-pass the same policy.
+Name resolution uses dnspython, not `getaddrinfo`. Each lookup runs in the
+calling thread under the check's own deadline, so a tenant pointing targets at
+nameservers that never answer cannot starve other tenants' lookups. Names are
+always queried as absolute (no resolver search domains), and `localhost` names
+map to loopback without DNS (RFC 6761). Agents should run with
+`PROBEATLAS_AGENT_NAMESERVERS` set to public recursive resolvers, so the hosting
+network's private or split-horizon zones are never consulted. The control plane
+has the matching `PROBEATLAS_WEBHOOK_NAMESERVERS`.
+
+DNS checks do not connect to the target. A/AAAA answers that point at blocked
+ranges, and CNAME/MX/NS answers that name local or internal hosts, are reported
+as `blocked_target` without revealing them, so DNS checks cannot map internal
+networks or zones. Custom nameservers must pass the same policy. TXT answers are
+returned as-is; with public resolvers they only contain public data.
 
 **Private monitoring is not supported in production.** Two explicit development
 switches exist:
@@ -56,6 +66,13 @@ read at most 64 KiB and never stored; minimum interval per workspace (default
 * Sessions (`pas_…`), API keys (`pak_<id>_<secret>`), agent tokens (`paa_…`),
   enrollment tokens (`pae_…`) are 256-bit random values. Only SHA-256 digests are
   stored. Secrets are shown once at creation.
+* Workspace membership requires consent: owners create an invitation (a `pai_…`
+  token valid for 7 days, shown once) and the invitee joins by accepting it with
+  the signed-in account whose email it was sent to. Invitation responses are the
+  same whether or not an account exists, so they cannot be used to enumerate
+  users, and a user's own first workspace stays their default.
+* Webhook URLs, which often embed receiver tokens, are shown in full only to
+  owners; members and API keys see scheme and host.
 * API keys are bound to one workspace, can expire, and can be revoked or rotated
   (rotation revokes the old key immediately). Only workspace owners using a
   session can create, rotate, or revoke keys, so a leaked key cannot mint more keys.
@@ -107,11 +124,11 @@ Token buckets: per workspace for `/v1` (default 300/min), per client IP for
 login and registration (20/min) and agent enrollment (10/min), and per agent
 for the agent protocol. Limits are per API process.
 
-**Known limitation:** the web server does not forward the browser's IP yet, so
-all dashboard sign-ins share the web server's auth bucket (and audit events from
-the dashboard record the web server's IP). Direct API clients are limited by
-their own IP when `FORWARDED_ALLOW_IPS` is set to the load balancer. See
-finding M1 in [security-review.md](security-review.md).
+The client IP comes from `X-Forwarded-For` only when the TCP peer is listed in
+`PROBEATLAS_TRUSTED_PROXIES` (the web servers and the API load balancer); from
+anyone else the header is ignored. The web server forwards the browser's IP only
+when `PROBEATLAS_WEB_TRUSTED_PROXY_HOPS` says how many proxies in front of it to
+trust. See [operations.md](operations.md#client-ip-forwarding).
 
 Known findings, the threat model, and the penetration test scope are tracked in
 [security-review.md](security-review.md).

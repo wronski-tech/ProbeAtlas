@@ -69,7 +69,7 @@ def run_icmp(job: JobSpec, ctx: CheckContext) -> MeasurementResult:
     timeout_s = job.timeout_ms / 1000
     start = time.perf_counter()
     try:
-        addrs = resolve_checked(job.target, 0, ctx.policy, timeout_s=timeout_s)
+        addrs = resolve_checked(job.target, ctx.policy, timeout_s=timeout_s)
     except BlockedTargetError as exc:
         return failure(job, measured_at, FailureCategory.BLOCKED_TARGET, str(exc))
     except ResolutionError as exc:

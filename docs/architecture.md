@@ -88,7 +88,7 @@ Scheduling, transport, storage, and alerting are protocol-agnostic.
 
 ## Data model
 
-* Identity: `users`, `user_sessions`, `workspaces`, `memberships`, `api_keys`.
+* Identity: `users`, `user_sessions`, `workspaces`, `memberships`, `invitations`, `api_keys`.
 * Configuration: `monitors`, `alert_rules`, `notification_channels`.
 * Agents: `enrollment_tokens`, `agents` (platform-operated; location set by operator).
 * Execution: `jobs`, `results` (raw, one row per job; aggregates are never written back).

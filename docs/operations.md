@@ -4,12 +4,13 @@
 
 | Process | Health | Metrics |
 | --- | --- | --- |
-| api | `GET /healthz` (process), `GET /readyz` (database) | `GET /metrics` |
+| api | `GET /healthz` (process), `GET /readyz` (database) | `:9101/metrics` (`PROBEATLAS_API_METRICS_PORT`) |
 | worker | logs (`worker started`, task errors) | `:9100/metrics` (`PROBEATLAS_WORKER_METRICS_PORT`) |
 | agent | heartbeat visible in `/v1/agents` (`status`, `last_heartbeat_at`) | structured logs |
 
-`/metrics` endpoints are meant for an internal scraper; do not expose them publicly.
-The API serves `/metrics` on its main port, so block that path at the load balancer.
+Metrics listeners are separate from the public ports and meant for an internal scraper: keep 9100 and
+9101 on the private network (compose publishes them on 127.0.0.1 only). The public API port does not
+serve `/metrics`.
 
 Key metrics:
 
@@ -49,6 +50,7 @@ docker run -d --name probeatlas-agent --restart unless-stopped \
   -e PROBEATLAS_AGENT_COUNTRY_CODE=DE \
   -e PROBEATLAS_AGENT_CITY=Frankfurt \
   -e PROBEATLAS_AGENT_PROVIDER="Hetzner AS24940" \
+  -e PROBEATLAS_AGENT_NAMESERVERS=1.1.1.1,8.8.8.8 \
   probeatlas-agent:<version>
 ```
 
@@ -56,6 +58,11 @@ docker run -d --name probeatlas-agent --restart unless-stopped \
   Keep the volume; after enrollment the token is no longer needed. If the
   identity is revoked the agent re-enrolls only if a valid enrollment token is
   still configured.
+* Set `PROBEATLAS_AGENT_NAMESERVERS` to public recursive resolvers (for example
+  `1.1.1.1,8.8.8.8`, or the provider's public resolver) so lookups never reach the
+  hosting network's private or split-horizon zones. Leave it empty only where the
+  host resolver is needed, such as the local compose demo, which relies on Docker DNS for
+  `demo-target`.
 * Location fields are operator assertions shown to customers. Do not infer them
   from IP geolocation.
 * Agents need outbound HTTPS to the API and outbound access to targets; they
@@ -131,8 +138,28 @@ PROBEATLAS_ALLOW_PRIVATE_TARGETS=false            # default
 PROBEATLAS_BOOTSTRAP_ENROLLMENT_TOKEN=             # unset; use probeatlas-admin tokens
 PROBEATLAS_WEBHOOK_ALLOWED_PRIVATE_CIDRS=          # unset
 PROBEATLAS_ALLOW_REGISTRATION=false                # until you open sign-ups
-FORWARDED_ALLOW_IPS=<load balancer CIDR>           # so per-IP rate limits see real API clients
+PROBEATLAS_TRUSTED_PROXIES=<web server IPs>,<API load balancer CIDR>   # who may set X-Forwarded-For
+PROBEATLAS_WEB_TRUSTED_PROXY_HOPS=1                # web container: proxies in front of it (e.g. the LB)
+PROBEATLAS_WEBHOOK_NAMESERVERS=1.1.1.1,8.8.8.8     # public resolvers for webhook destinations
 ```
+
+### Client IP forwarding
+
+Per-IP rate limits (login, registration, enrollment) and audit events need the real client address:
+
+```
+browser ─▶ load balancer ─(XFF: client)─▶ web ─(XFF: client)─▶ API
+API client ─▶ load balancer ─(XFF: client)─▶ API
+```
+
+* **Web:** `PROBEATLAS_WEB_TRUSTED_PROXY_HOPS` is the number of proxies in front of the web server that
+  append to `X-Forwarded-For`. The web server takes the entry that many positions from the right (entries
+  further left come from the client and may be forged) and forwards only that IP to the API. With `0`
+  (browsers connect directly, as in local compose) nothing is forwarded and all dashboard sign-ins share
+  the web server's rate-limit bucket.
+* **API:** `PROBEATLAS_TRUSTED_PROXIES` lists the web servers and the API load balancer. Forwarded headers
+  from any other peer are ignored, so clients cannot pick a fresh rate-limit bucket by inventing an
+  address. Never set it to `*` or to a range that includes agents or the internet.
 
 ### Production readiness checklist (not yet done)
 
@@ -149,5 +176,5 @@ FORWARDED_ALLOW_IPS=<load balancer CIDR>           # so per-IP rate limits see r
 - [ ] Abuse controls for sign-up (email verification, CAPTCHA) and outbound
       volume per destination.
 - [x] Internal security review; critical and high findings fixed ([security-review.md](security-review.md)).
-- [ ] Fix the open review findings (M1 forwarded client IP, M2 internal metrics port, H2 DNS resolver, L2, L4, L7).
+- [x] Fix the internal review findings (all closed; see [security-review.md](security-review.md)).
 - [ ] External penetration test (scope in [security-review.md](security-review.md#3-external-penetration-test-package)).

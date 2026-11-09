@@ -20,6 +20,7 @@ PREFIX_API_KEY = "pak"
 PREFIX_AGENT = "paa"
 PREFIX_ENROLLMENT = "pae"
 PREFIX_WEBHOOK_SECRET = "pah"
+PREFIX_INVITATION = "pai"
 
 
 def hash_password(password: str) -> str:

@@ -69,7 +69,7 @@ docker compose ps                # api should be "healthy", agents "running"
 | --- | --- |
 | Dashboard | http://localhost:3000 |
 | API + OpenAPI UI | http://localhost:8000/docs |
-| Worker metrics | http://localhost:9100/metrics |
+| Worker / API metrics (internal) | http://localhost:9100/metrics · http://localhost:9101/metrics |
 | Demo target control | http://localhost:18081/control |
 
 Stop with `docker compose down`; delete all data with `docker compose down -v`.
@@ -191,6 +191,9 @@ and [.env.example](.env.example)):
 | `BOOTSTRAP_ENROLLMENT_TOKEN` | empty | Multi-use enrollment token for local agents |
 | `DEFAULT_MAX_MONITORS` / `MIN_INTERVAL_SECONDS` | 25 / 30 | Per-workspace limits for new workspaces |
 | `RATE_LIMIT_PER_MINUTE` / `AUTH_RATE_LIMIT_PER_MINUTE` | 300 / 20 | API rate limits |
+| `WEBHOOK_NAMESERVERS` | empty | Resolvers for webhook destinations (empty = host resolver) |
+| `TRUSTED_PROXIES` | empty | IPs/CIDRs (web server, load balancer) allowed to set `X-Forwarded-For` |
+| `API_METRICS_PORT` / `WORKER_METRICS_PORT` | 9101 / 9100 | Internal Prometheus listeners (0 disables) |
 | `AGENT_OFFLINE_AFTER_SECONDS` | 60 | Heartbeat staleness threshold |
 | `JOB_MAX_ATTEMPTS` / `JOB_LEASE_GRACE_SECONDS` | 2 / 30 | Retry policy for lost jobs |
 | `RESULT_RETENTION_DAYS` / `JOB_RETENTION_DAYS` | 30 / 7 | Retention |
@@ -198,7 +201,8 @@ and [.env.example](.env.example)):
 Agent (`PROBEATLAS_AGENT_*` plus `PROBEATLAS_API_URL`): `REGION` (required),
 `ENROLLMENT_TOKEN`, `NAME`, `COUNTRY_CODE`, `CITY`, `PROVIDER`, `STATE_FILE`,
 `CONCURRENCY` (8), `POLL_INTERVAL` (2 s), `HEARTBEAT_INTERVAL` (15 s),
-`ALLOWED_PRIVATE_CIDRS` (empty). See [docs/operations.md](docs/operations.md#running-an-agent).
+`ALLOWED_PRIVATE_CIDRS` (empty), `NAMESERVERS` (empty = host resolver; use public resolvers in
+production). See [docs/operations.md](docs/operations.md#running-an-agent).
 
 ## Current limitations
 
@@ -206,10 +210,11 @@ Agent (`PROBEATLAS_AGENT_*` plus `PROBEATLAS_API_URL`): `REGION` (required),
   timings measured from inside some sandboxes and corporate networks pass
   through egress proxies and do not reflect the real path (for example, TCP
   connect times near 0 ms to remote hosts).
-* Rate limits are per API process (in memory), and dashboard sign-ins share the web server's
-  auth rate-limit bucket until the web tier forwards client IPs.
-* No external security review yet. Open findings from the internal review are listed in
-  [docs/security-review.md](docs/security-review.md).
+* Rate limits are per API process (in memory). Locally, browsers connect to the web server directly,
+  so dashboard sign-ins share one rate-limit bucket; behind a load balancer set
+  `PROBEATLAS_WEB_TRUSTED_PROXY_HOPS=1` (see [operations](docs/operations.md#client-ip-forwarding)).
+* No external security review or penetration test yet. All internal review findings are fixed; the
+  threat model, findings, and pen-test scope are in [docs/security-review.md](docs/security-review.md).
 * ICMP needs `net.ipv4.ping_group_range` to include the agent's group; otherwise
   the agent does not advertise ICMP and reports such jobs as `unsupported`.
 * Aggregates are computed at query time from raw results (fine for MVP volumes;
@@ -226,6 +231,6 @@ Agent (`PROBEATLAS_AGENT_*` plus `PROBEATLAS_API_URL`): `REGION` (required),
 | Every check fails with `blocked_target` | The destination resolves to a private, loopback, or metadata address. This is intentional; see [docs/security.md](docs/security.md). |
 | ICMP checks report `unsupported` | Set the sysctl `net.ipv4.ping_group_range="0 2147483647"` for the agent (already set in compose). |
 | Agent logs `credentials rejected; re-enrolling` | The agent was disabled or its state file belongs to another database; it re-enrolls if an enrollment token is configured. |
-| Port already in use | Change the published port in `docker-compose.yml` (5432, 8000, 3000, 9100, 18081). |
+| Port already in use | Change the published port in `docker-compose.yml` (5432, 8000, 3000, 9100, 9101, 18081). |
 | Tests fail to connect to PostgreSQL | `docker compose up -d db`, or set `PROBEATLAS_TEST_DATABASE_URL`. |
 | HTTP 429 `rate_limited` | Wait for `Retry-After` seconds or raise `PROBEATLAS_RATE_LIMIT_PER_MINUTE`. |

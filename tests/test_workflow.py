@@ -25,7 +25,7 @@ def make_agent(client, tmp_path, region="test-a") -> Agent:
         api_url="http://testserver", enrollment_token=BOOTSTRAP_TOKEN, name=f"e2e-{region}", region=region,
         country_code="PL", city="Warsaw", provider="local-dev", state_file=str(tmp_path / f"{region}.json"),
         concurrency=4, poll_interval_s=0.1, heartbeat_interval_s=0.5,
-        allowed_private_cidrs="127.0.0.0/8,::1/128", ca_file=None,
+        allowed_private_cidrs="127.0.0.0/8,::1/128", nameservers="", ca_file=None,
     )
     cp = ControlPlaneClient(cfg.api_url)
     cp._http = client  # route agent traffic into the in-process ASGI app

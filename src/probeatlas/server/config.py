@@ -32,6 +32,8 @@ class Settings(BaseSettings):
     # Target policy. Private targets are a development/demo opt-in only.
     allow_private_targets: bool = False
     webhook_allowed_private_cidrs: str = ""
+    # Resolvers for webhook destinations (comma-separated IPs); empty = the host's resolver.
+    webhook_nameservers: str = ""
 
     # Agents and jobs
     bootstrap_enrollment_token: str | None = None
@@ -49,6 +51,13 @@ class Settings(BaseSettings):
     # Worker
     worker_tick_seconds: float = 2.0
     worker_metrics_port: int = 9100
+
+    # API process: Prometheus metrics on a separate, internal-only port (0 disables).
+    api_metrics_port: int = 9101
+
+    # Comma-separated IPs/CIDRs of reverse proxies whose X-Forwarded-For/-Proto headers are trusted: the
+    # dashboard's web server and the API load balancer. Empty means the TCP peer is the client.
+    trusted_proxies: str = ""
 
     cors_origins: str = ""
 
@@ -69,6 +78,7 @@ class Settings(BaseSettings):
         return NetworkPolicy.from_cidrs(
             self.webhook_allowed_private_cidrs,
             allow_private_hostnames=bool(self.webhook_allowed_private_cidrs),
+            nameservers=self.webhook_nameservers,
         )
 
 

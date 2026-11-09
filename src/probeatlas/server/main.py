@@ -8,10 +8,10 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import PlainTextResponse
-from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+from prometheus_client import start_http_server
 from sqlalchemy import text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
 from probeatlas import __version__
 from probeatlas.common.logs import log_fields, setup_logging
@@ -96,7 +96,7 @@ def create_app() -> FastAPI:
         """Log each request (method, path, status, duration) and add ``X-Content-Type-Options``."""
         start = time.perf_counter()
         response = await call_next(request)
-        if request.url.path not in ("/healthz", "/metrics"):
+        if request.url.path != "/healthz":
             log.info("request", extra=log_fields(method=request.method, path=request.url.path,
                                                  status=response.status_code,
                                                  duration_ms=round((time.perf_counter() - start) * 1000, 1)))
@@ -119,11 +119,9 @@ def create_app() -> FastAPI:
             conn.execute(text("SELECT 1"))
         return {"status": "ready"}
 
-    @app.get("/metrics", tags=["ops"], include_in_schema=False)
-    def prom_metrics():
-        """Expose Prometheus metrics for this API process."""
-        return PlainTextResponse(generate_latest(), media_type=CONTENT_TYPE_LATEST)
-
+    # Outermost middleware: per-IP rate limits and audit events must see the real client address. Only the
+    # configured proxies may set it; anyone else's X-Forwarded-For is ignored.
+    app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=settings.trusted_proxies or [])
     return app
 
 
@@ -131,9 +129,16 @@ app = create_app()
 
 
 def run() -> None:
-    """Run the API with uvicorn on port 8000 using ProbeAtlas JSON logging."""
+    """Run the API with uvicorn on port 8000 and Prometheus metrics on ``PROBEATLAS_API_METRICS_PORT``.
+
+    Metrics are served by a separate listener so that the public port never exposes them.
+    """
     import uvicorn
 
     setup_logging("api")
+    settings = get_settings()
+    if settings.api_metrics_port:
+        start_http_server(settings.api_metrics_port)
+    # Forwarded headers are handled by the app itself (PROBEATLAS_TRUSTED_PROXIES), not by uvicorn.
     uvicorn.run("probeatlas.server.main:app", host="0.0.0.0", port=8000, log_config=None,  # noqa: S104
-                proxy_headers=True)
+                proxy_headers=False)

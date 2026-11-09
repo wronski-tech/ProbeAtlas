@@ -94,7 +94,7 @@ def test_resolution_time_validation_blocks_names_pointing_at_private_addresses()
     # this is the layer that defeats DNS names pointing at internal addresses.
     relaxed = NetworkPolicy(allow_private_hostnames=True)
     with pytest.raises(BlockedTargetError, match="loopback"):
-        resolve_checked("localhost", 80, relaxed, timeout_s=2)
+        resolve_checked("localhost", relaxed, timeout_s=2)
 
 
 def test_http_request_to_private_address_is_blocked_before_connecting(target_server):

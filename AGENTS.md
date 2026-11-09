@@ -27,7 +27,7 @@ sudo docker compose up -d db               # PostgreSQL for tests (orb: use sudo
 make lint                                  # ruff (incl. pydocstyle) + documentation coverage
 cd web && npm run typecheck && npm test && npm run build
 make openapi                               # regenerate docs/openapi.json after any API or schema change
-sudo docker compose up -d --build          # full stack: web :3000, api :8000, worker metrics :9100
+sudo docker compose up -d --build          # full stack: web :3000, api :8000, metrics :9100 (worker) / :9101 (api)
 make restore-drill COMPOSE="sudo docker compose"   # backup + restore verification
 ```
 

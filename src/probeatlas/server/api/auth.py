@@ -6,19 +6,22 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, Header, Request
-from sqlalchemy import func, select
+from sqlalchemy import Select, func, select
 from sqlalchemy.orm import Session
 
 from ..audit import audit
 from ..config import Settings, get_settings
 from ..db import get_db
-from ..deps import Principal, client_ip, get_current_user, get_principal, require_owner
+from ..deps import Principal, client_ip, get_current_user, get_principal, require_owner, tenant_get
 from ..errors import APIError, not_found
-from ..models import Membership, User, UserSession, Workspace
+from ..models import Invitation, Membership, User, UserSession, Workspace
 from ..ratelimit import limiter
 from ..schemas import (
+    InvitationAccept,
+    InvitationCreate,
+    InvitationIssued,
+    InvitationOut,
     LoginRequest,
-    MemberAdd,
     MemberOut,
     MeOut,
     RegisterRequest,
@@ -27,18 +30,28 @@ from ..schemas import (
     WorkspaceCreate,
     WorkspaceOut,
 )
-from ..security import DUMMY_PASSWORD_HASH, PREFIX_SESSION, hash_password, new_token, token_hash, verify_password
+from ..security import (
+    DUMMY_PASSWORD_HASH,
+    PREFIX_INVITATION,
+    PREFIX_SESSION,
+    hash_password,
+    new_token,
+    token_hash,
+    verify_password,
+)
 
 router = APIRouter(prefix="/v1", tags=["auth & workspaces"])
 
 
 def _workspaces(db: Session, user_id: uuid.UUID) -> list[WorkspaceOut]:
-    """Return the workspaces ``user_id`` belongs to, with their role in each."""
+    """Return the workspaces ``user_id`` belongs to, in the order they joined, with their role in each."""
     rows = db.execute(
         select(Workspace, Membership.role)
         .join(Membership, Membership.workspace_id == Workspace.id)
         .where(Membership.user_id == user_id)
-        .order_by(Workspace.created_at)
+        # Order by when the user joined: their own first workspace stays first, so the dashboard's default
+        # workspace at sign-in never becomes one they were invited into.
+        .order_by(Membership.created_at, Workspace.id)
     ).all()
     return [WorkspaceOut.model_validate(ws).model_copy(update={"role": role}) for ws, role in rows]
 
@@ -156,20 +169,85 @@ def list_members(p: Principal = Depends(get_principal), db: Session = Depends(ge
             for m, u in rows]
 
 
-@router.post("/members", response_model=MemberOut, status_code=201)
-def add_member(body: MemberAdd, p: Principal = Depends(require_owner), db: Session = Depends(get_db)):
-    """Add a registered user to the workspace by email (owner only)."""
-    user = db.execute(select(User).where(User.email == body.email.lower())).scalar_one_or_none()
-    if user is None:
-        raise APIError(404, "user_not_found", "no user with this email; ask them to register first")
-    if db.get(Membership, (p.workspace_id, user.id)):
-        raise APIError(409, "already_member", "user is already a member")
-    m = Membership(workspace_id=p.workspace_id, user_id=user.id, role=body.role)
-    db.add(m)
-    audit(db, "member.added", workspace_id=p.workspace_id, actor_type=p.actor_type, actor_id=p.actor_id,
-          target_type="user", target_id=user.id, ip=p.ip, details={"role": body.role})
+INVITATION_TTL = timedelta(days=7)
+MAX_PENDING_INVITATIONS = 50
+
+
+def _pending(query: Select, now: datetime) -> Select:
+    """Restrict an invitation query to invitations that can still be accepted."""
+    return query.where(Invitation.accepted_at.is_(None), Invitation.revoked_at.is_(None),
+                          Invitation.expires_at > now)
+
+
+@router.post("/invitations", response_model=InvitationIssued, status_code=201)
+def create_invitation(body: InvitationCreate, p: Principal = Depends(require_owner), db: Session = Depends(get_db)):
+    """Invite someone to the workspace by email (owner only). The secret token is returned once.
+
+    Nobody is added until the invitee accepts with their own account, and the response is identical whether
+    or not an account with this email exists. Invitations expire after 7 days; at most 50 can be pending.
+    """
+    email, now = body.email.lower(), datetime.now(UTC)
+    already = db.execute(select(Membership.user_id).join(User, User.id == Membership.user_id).where(
+        Membership.workspace_id == p.workspace_id, User.email == email)).first()
+    if already:
+        raise APIError(409, "already_member", "a member with this email is already in the workspace")
+    pending = db.execute(_pending(select(func.count()).select_from(Invitation), now)
+                         .where(Invitation.workspace_id == p.workspace_id)).scalar_one()
+    if pending >= MAX_PENDING_INVITATIONS:
+        raise APIError(403, "limit_exceeded", f"at most {MAX_PENDING_INVITATIONS} pending invitations")
+    token = new_token(PREFIX_INVITATION)
+    inv = Invitation(workspace_id=p.workspace_id, email=email, role=body.role, token_hash=token_hash(token),
+                     created_by=p.user_id, created_at=now, expires_at=now + INVITATION_TTL)
+    db.add(inv)
+    db.flush()
+    audit(db, "invitation.created", workspace_id=p.workspace_id, actor_type=p.actor_type, actor_id=p.actor_id,
+          target_type="invitation", target_id=inv.id, ip=p.ip, details={"role": body.role})
     db.commit()
-    return MemberOut(user_id=user.id, email=user.email, name=user.name, role=m.role, created_at=m.created_at)
+    return InvitationIssued(**InvitationOut.model_validate(inv).model_dump(), token=token)
+
+
+@router.get("/invitations", response_model=list[InvitationOut])
+def list_invitations(p: Principal = Depends(require_owner), db: Session = Depends(get_db)):
+    """List the workspace's pending invitations (owner only)."""
+    q = _pending(select(Invitation), datetime.now(UTC)).where(Invitation.workspace_id == p.workspace_id)
+    return db.execute(q.order_by(Invitation.created_at.desc())).scalars().all()
+
+
+@router.delete("/invitations/{invitation_id}", status_code=204)
+def revoke_invitation(invitation_id: uuid.UUID, p: Principal = Depends(require_owner),
+                      db: Session = Depends(get_db)):
+    """Revoke a pending invitation so its token can no longer be used (owner only)."""
+    inv = tenant_get(db, Invitation, invitation_id, p, "invitation")
+    if inv.accepted_at is None and inv.revoked_at is None:
+        inv.revoked_at = datetime.now(UTC)
+        audit(db, "invitation.revoked", workspace_id=p.workspace_id, actor_type=p.actor_type,
+              actor_id=p.actor_id, target_type="invitation", target_id=inv.id, ip=p.ip)
+        db.commit()
+
+
+@router.post("/invitations/accept", response_model=WorkspaceOut)
+def accept_invitation(body: InvitationAccept, request: Request, user: User = Depends(get_current_user),
+                      db: Session = Depends(get_db)):
+    """Join a workspace by accepting an invitation (session tokens only).
+
+    The invitation must be pending and addressed to the signed-in account's email. Unknown, expired,
+    revoked, used, and mismatched tokens all get the same 404.
+    """
+    limiter.hit(f"invite:{user.id}", 20)
+    now = datetime.now(UTC)
+    inv = db.execute(_pending(select(Invitation), now).where(
+        Invitation.token_hash == token_hash(body.token)).with_for_update()).scalar_one_or_none()
+    if inv is None or inv.email != user.email.lower():
+        raise not_found("invitation")
+    if db.get(Membership, (inv.workspace_id, user.id)):
+        raise APIError(409, "already_member", "you are already a member of this workspace")
+    inv.accepted_at, inv.accepted_by = now, user.id
+    db.add(Membership(workspace_id=inv.workspace_id, user_id=user.id, role=inv.role))
+    audit(db, "invitation.accepted", workspace_id=inv.workspace_id, actor_type="user", actor_id=user.id,
+          target_type="invitation", target_id=inv.id, ip=client_ip(request), details={"role": inv.role})
+    db.commit()
+    ws = db.get(Workspace, inv.workspace_id)
+    return WorkspaceOut.model_validate(ws).model_copy(update={"role": inv.role})
 
 
 @router.delete("/members/{user_id}", status_code=204)

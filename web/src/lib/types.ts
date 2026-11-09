@@ -168,4 +168,5 @@ export type ApiKey = {
 
 export type Channel = { id: string; name: string; url: string; enabled: boolean; created_at: string; signing_secret?: string };
 export type Member = { user_id: string; email: string; name: string; role: string; created_at: string };
+export type Invitation = { id: string; email: string; role: string; created_at: string; expires_at: string; token?: string };
 export type MonitorEvent = { at: string; source: "incident" | "audit"; kind: string; message: string };

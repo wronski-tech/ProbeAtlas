@@ -2,14 +2,26 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button, ErrorBanner, Field, Input } from "./ui";
+
+/** Where to go after signing in: a same-site path from `?next=` (for example an invitation), else the dashboard. */
+function nextPath(): string {
+  const next = new URLSearchParams(window.location.search).get("next");
+  return next && next.startsWith("/") && !next.startsWith("//") && !next.startsWith("/\\") ? next : "/";
+}
 
 /** Sign-in or registration form. The session token is kept in an httpOnly cookie by the server route. */
 export function AuthForm({ mode }: { mode: "login" | "register" }) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Read after mount (window is not available during prerendering); kept when switching login ↔ register.
+  const [nextQuery, setNextQuery] = useState("");
+  useEffect(() => {
+    const next = nextPath();
+    if (next !== "/") setNextQuery(`?next=${encodeURIComponent(next)}`);
+  }, []);
 
   /** Submit credentials to the session route and go to the dashboard on success. */
   async function submit(e: React.FormEvent<HTMLFormElement>) {
@@ -29,7 +41,7 @@ export function AuthForm({ mode }: { mode: "login" | "register" }) {
       setError(err?.details?.map((d: { loc: string[]; msg: string }) => `${d.loc.at(-1)}: ${d.msg}`).join("; ") || err?.message || "Request failed");
       return;
     }
-    router.push("/");
+    router.push(nextPath());
     router.refresh();
   }
 
@@ -65,11 +77,11 @@ export function AuthForm({ mode }: { mode: "login" | "register" }) {
         <p className="mt-4 text-center text-sm text-slate-500">
           {mode === "login" ? (
             <>
-              No account? <Link className="font-medium text-sky-700 hover:underline" href="/register">Register</Link>
+              No account? <Link className="font-medium text-sky-700 hover:underline" href={`/register${nextQuery}`}>Register</Link>
             </>
           ) : (
             <>
-              Already registered? <Link className="font-medium text-sky-700 hover:underline" href="/login">Sign in</Link>
+              Already registered? <Link className="font-medium text-sky-700 hover:underline" href={`/login${nextQuery}`}>Sign in</Link>
             </>
           )}
         </p>

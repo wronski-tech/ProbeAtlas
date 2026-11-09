@@ -56,3 +56,10 @@ def test_api_keys_cannot_be_revoked_across_workspaces(account, other_account):
     assert other_account.delete(f"/v1/api-keys/{key_id}").status_code == 404
     assert other_account.post(f"/v1/api-keys/{key_id}/rotate").status_code == 404
     assert account.get("/v1/api-keys").json()[0]["revoked_at"] is None
+
+
+def test_invitations_are_isolated(client, account, other_account):
+    inv = account.post("/v1/invitations", {"email": "someone@example.com"}).json()
+    assert other_account.get("/v1/invitations").json() == []
+    assert other_account.delete(f"/v1/invitations/{inv['id']}").status_code == 404
+    assert [i["id"] for i in account.get("/v1/invitations").json()] == [inv["id"]]

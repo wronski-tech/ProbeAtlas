@@ -9,7 +9,7 @@ import uuid
 import dns.exception
 import dns.resolver
 
-from probeatlas.common.netpolicy import BlockedTargetError
+from probeatlas.common.netpolicy import BlockedTargetError, ResolutionError, validate_hostname
 from probeatlas.common.schemas import FailureCategory, JobSpec, MeasurementResult, utcnow
 
 from .base import CheckContext, failure
@@ -20,22 +20,28 @@ MAX_ANSWERS = 20
 def run_dns(job: JobSpec, ctx: CheckContext) -> MeasurementResult:
     """Resolve a record and time the lookup.
 
-    Uses the agent's system resolver, or a customer-specified nameserver that
-    must itself pass the network policy. A/AAAA answers that point at blocked
-    address ranges are reported as ``blocked_target`` without revealing them,
-    so DNS checks cannot be used to map private networks.
+    Uses the agent's configured resolvers (``policy.nameservers``, else the system resolver), or a
+    customer-specified nameserver that must itself pass the network policy. The name is always queried as
+    absolute, so resolver search domains are never appended. A/AAAA answers that point at blocked address
+    ranges, and CNAME/MX/NS answers that name local or internal hosts, are reported as ``blocked_target``
+    without revealing them, so DNS checks cannot be used to map private networks or internal zones.
     """
     measured_at = utcnow()
     record_type = job.settings.get("record_type", "A")
     nameserver = job.settings.get("nameserver")
     timeout_s = job.timeout_ms / 1000
-    resolver = dns.resolver.Resolver()
     if nameserver:
         try:
             ctx.policy.check_ip(nameserver)
         except (BlockedTargetError, ValueError) as exc:
             return failure(job, measured_at, FailureCategory.BLOCKED_TARGET, f"nameserver not allowed: {exc}")
+        resolver = dns.resolver.Resolver(configure=False)
         resolver.nameservers = [nameserver]
+    else:
+        try:
+            resolver = ctx.policy.resolver()
+        except ResolutionError as exc:
+            return failure(job, measured_at, FailureCategory.DNS_ERROR, str(exc))
     resolver.lifetime = timeout_s
     resolver.timeout = timeout_s
 
@@ -62,6 +68,14 @@ def run_dns(job: JobSpec, ctx: CheckContext) -> MeasurementResult:
             if reason:
                 return failure(job, measured_at, FailureCategory.BLOCKED_TARGET,
                                f"name resolves to a {reason}", dns_ms=dns_ms)
+    elif record_type in ("CNAME", "MX", "NS"):
+        for rdata in list(answer)[:MAX_ANSWERS]:
+            host = getattr(rdata, "exchange", None) or rdata.target  # MX vs CNAME/NS
+            try:
+                validate_hostname(host.to_text(omit_final_dot=True), ctx.policy)
+            except (BlockedTargetError, ValueError):
+                return failure(job, measured_at, FailureCategory.BLOCKED_TARGET,
+                               "answer points at a local or internal name", dns_ms=dns_ms)
     return MeasurementResult(
         result_id=uuid.uuid4(),
         job_id=job.job_id,

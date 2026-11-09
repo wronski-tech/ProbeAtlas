@@ -115,11 +115,37 @@ class WorkspaceCreate(BaseModel):
     name: str = Field(min_length=1, max_length=100)
 
 
-class MemberAdd(BaseModel):
-    """Add an existing user, by email, to the workspace with a role."""
+class InvitationCreate(BaseModel):
+    """Invite someone, by email, to join the workspace with a role. They must accept with that account."""
 
     email: EmailStr
     role: Literal["owner", "member"] = "member"
+
+
+class InvitationOut(ORM):
+    """A pending invitation."""
+
+    id: uuid.UUID
+    email: str
+    role: str
+    created_at: datetime
+    expires_at: datetime
+
+
+class InvitationIssued(InvitationOut):
+    """A new invitation including its secret ``token`` (shown only once).
+
+    Share the token, or the dashboard link ``/invite/<token>``, with the invitee out of band. The response
+    is the same whether or not an account with this email exists.
+    """
+
+    token: str = Field(description="Invitation secret. Shown only once.")
+
+
+class InvitationAccept(BaseModel):
+    """Accept an invitation with the signed-in account whose email it was sent to."""
+
+    token: str = Field(min_length=1, max_length=200)
 
 
 class MemberOut(BaseModel):

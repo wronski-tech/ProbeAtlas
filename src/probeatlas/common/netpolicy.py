@@ -19,11 +19,14 @@ Cloud metadata endpoints are blocked even when allowlisted.
 
 from __future__ import annotations
 
-import concurrent.futures
 import ipaddress
 import re
 import socket
+import time
 from dataclasses import dataclass, field
+
+import dns.exception
+import dns.resolver
 
 IPAddress = ipaddress.IPv4Address | ipaddress.IPv6Address
 IPNetwork = ipaddress.IPv4Network | ipaddress.IPv6Network
@@ -71,12 +74,6 @@ _EXTRA_BLOCKED = (
     ipaddress.ip_network("fec0::/10"),  # deprecated site-local
 )
 
-# getaddrinfo() has no timeout parameter; resolve in a pool so a hung resolver cannot block a check beyond
-# its deadline. Abandoned lookups keep their thread until the system resolver gives up (several seconds), so
-# the pool is sized well above agent concurrency: a tenant pointing monitors at unresponsive nameservers
-# must not starve other tenants' lookups. Replacing getaddrinfo with dnspython (hard lifetime) is tracked in
-# docs/security-review.md.
-_resolver_pool = concurrent.futures.ThreadPoolExecutor(max_workers=64, thread_name_prefix="resolve")
 
 
 class BlockedTargetError(Exception):
@@ -108,21 +105,41 @@ class NetworkPolicy:
     ``allow_private_hostnames`` relaxes the syntactic hostname checks
     (``localhost``, single-label names, ``.internal``). Resolution-time IP
     checks still apply.
+
+    ``nameservers`` are the resolvers used for resolution-time checks (and DNS checks without a custom
+    nameserver). Empty means the host's resolver from ``/etc/resolv.conf``. Public agents should use public
+    recursive resolvers so that split-horizon or private zones of the hosting network are never consulted.
     """
 
     allowed_private_networks: tuple[IPNetwork, ...] = field(default_factory=tuple)
     allow_private_hostnames: bool = False
+    nameservers: tuple[str, ...] = field(default_factory=tuple)
 
     @classmethod
-    def from_cidrs(cls, cidrs: str | list[str] | None, allow_private_hostnames: bool = False) -> NetworkPolicy:
-        """Build a policy from a comma-separated string or list of private CIDRs to allow.
+    def from_cidrs(
+        cls, cidrs: str | list[str] | None, allow_private_hostnames: bool = False, nameservers: str = ""
+    ) -> NetworkPolicy:
+        """Build a policy from comma-separated (or listed) private CIDRs to allow and nameserver IPs.
 
-        An empty value yields the default policy, which allows only globally routable addresses.
+        An empty ``cidrs`` yields the default policy, which allows only globally routable addresses.
         """
         if isinstance(cidrs, str):
             cidrs = [c.strip() for c in cidrs.split(",") if c.strip()]
         nets = tuple(ipaddress.ip_network(c, strict=False) for c in (cidrs or []))
-        return cls(allowed_private_networks=nets, allow_private_hostnames=allow_private_hostnames)
+        servers = tuple(str(ipaddress.ip_address(s.strip())) for s in nameservers.split(",") if s.strip())
+        return cls(allowed_private_networks=nets, allow_private_hostnames=allow_private_hostnames,
+                   nameservers=servers)
+
+    def resolver(self) -> dns.resolver.Resolver:
+        """Return a dnspython resolver for this policy's nameservers (the system resolver if none)."""
+        if not self.nameservers:
+            try:
+                return dns.resolver.Resolver()
+            except dns.resolver.NoResolverConfiguration as exc:
+                raise ResolutionError("no DNS resolver configured") from exc
+        resolver = dns.resolver.Resolver(configure=False)
+        resolver.nameservers = list(self.nameservers)
+        return resolver
 
     def ip_block_reason(self, ip: IPAddress) -> str | None:
         """Return why ``ip`` is blocked, or ``None`` if it may be contacted."""
@@ -213,7 +230,6 @@ def validate_hostname(host: str, policy: NetworkPolicy) -> str:
 
 def resolve_checked(
     host: str,
-    port: int,
     policy: NetworkPolicy,
     timeout_s: float,
     family: int = socket.AF_UNSPEC,
@@ -222,33 +238,62 @@ def resolve_checked(
 
     If any resolved address is blocked the whole destination is rejected, so a
     name that mixes public and private answers cannot be used to reach the
-    private one. Returns ``(family, ip)`` pairs in resolver order.
+    private one. Returns ``(family, ip)`` pairs, IPv4 first.
     """
     literal = parse_ip(host)
     if literal is not None:
         policy.check_ip(literal)
         fam = socket.AF_INET6 if literal.version == 6 else socket.AF_INET
         return [(fam, literal)]
-
-    future = _resolver_pool.submit(socket.getaddrinfo, host, port, family, socket.SOCK_STREAM)
-    try:
-        infos = future.result(timeout=max(timeout_s, 0.001))
-    except concurrent.futures.TimeoutError as exc:
-        raise ResolutionError("DNS resolution timed out", timeout=True) from exc
-    except socket.gaierror as exc:
-        nx = exc.errno in (socket.EAI_NONAME, getattr(socket, "EAI_NODATA", -5))
-        raise ResolutionError("DNS resolution failed" + (": name not found" if nx else ""), nxdomain=nx) from exc
-
-    seen: list[tuple[int, IPAddress]] = []
-    for fam, _type, _proto, _canon, sockaddr in infos:
-        ip = ipaddress.ip_address(sockaddr[0].split("%", 1)[0])
-        if (fam, ip) not in seen:
-            seen.append((fam, ip))
-    if not seen:
-        raise ResolutionError("DNS resolution returned no addresses")
-    for _fam, ip in seen:
+    name = host.rstrip(".").lower()
+    if name == "localhost" or name.endswith(".localhost"):
+        # RFC 6761: localhost names are loopback and are never sent to DNS.
+        addrs: list[tuple[int, IPAddress]] = [(socket.AF_INET, ipaddress.ip_address("127.0.0.1")),
+                                              (socket.AF_INET6, ipaddress.ip_address("::1"))]
+        addrs = [a for a in addrs if family in (socket.AF_UNSPEC, a[0])]
+    else:
+        addrs = _lookup(name, policy, timeout_s, family)
+    for _fam, ip in addrs:
         policy.check_ip(ip)
-    return seen
+    return addrs
+
+
+def _lookup(name: str, policy: NetworkPolicy, timeout_s: float, family: int) -> list[tuple[int, IPAddress]]:
+    """Query A and AAAA records for ``name`` within ``timeout_s`` seconds in total.
+
+    dnspython enforces the deadline itself and runs in the calling thread, so an unresponsive nameserver
+    can delay only the check that asked; there is no shared resolver pool to exhaust (unlike
+    ``getaddrinfo``, which has no timeout). The name is always queried as absolute (``search=False``), so the
+    host's resolver search domains (for example Kubernetes ``svc.cluster.local``) are never appended.
+    """
+    deadline = time.monotonic() + timeout_s
+    resolver = policy.resolver()
+    queries = [("A", socket.AF_INET), ("AAAA", socket.AF_INET6)]
+    out: list[tuple[int, IPAddress]] = []
+    for rdtype, fam in queries:
+        if family not in (socket.AF_UNSPEC, fam):
+            continue
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise ResolutionError("DNS resolution timed out", timeout=True)
+        resolver.lifetime = resolver.timeout = remaining
+        try:
+            answer = resolver.resolve(name, rdtype, search=False)
+        except dns.resolver.NXDOMAIN as exc:
+            raise ResolutionError("DNS resolution failed: name not found", nxdomain=True) from exc
+        except dns.resolver.NoAnswer:
+            continue
+        except dns.resolver.LifetimeTimeout as exc:
+            raise ResolutionError("DNS resolution timed out", timeout=True) from exc
+        except dns.exception.DNSException as exc:
+            raise ResolutionError(f"DNS resolution failed: {type(exc).__name__}") from exc
+        for record in answer:
+            ip = ipaddress.ip_address(record.address)
+            if (fam, ip) not in out:
+                out.append((fam, ip))
+    if not out:
+        raise ResolutionError("DNS resolution returned no addresses")
+    return out
 
 
 def http_port_allowed(port: int) -> bool:

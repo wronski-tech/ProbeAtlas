@@ -36,7 +36,7 @@ from probeatlas.server.ratelimit import limiter  # noqa: E402
 TABLES = [
     "audit_events", "notification_deliveries", "notification_channels", "incident_events", "incidents",
     "alert_states", "alert_rules", "results", "jobs", "monitors", "agents", "enrollment_tokens", "api_keys",
-    "memberships", "user_sessions", "workspaces", "users",
+    "invitations", "memberships", "user_sessions", "workspaces", "users",
 ]
 
 
@@ -120,6 +120,7 @@ class Account:
         assert r.status_code == 201, r.text
         body = r.json()
         self.client = client
+        self.email = email
         self.token = body["token"]
         self.workspace_id = body["workspaces"][0]["id"]
         self.headers = {"Authorization": f"Bearer {self.token}", "X-Workspace-Id": self.workspace_id}
@@ -145,6 +146,13 @@ class Account:
         r = self.post("/v1/api-keys", {"name": "test"})
         assert r.status_code == 201, r.text
         return r.json()["key"]
+
+    def invite(self, other: Account, role: str = "member") -> None:
+        """Invite ``other`` into this account's workspace and accept it as ``other``."""
+        token = self.post("/v1/invitations", {"email": other.email, "role": role}).json()["token"]
+        r = other.client.post("/v1/invitations/accept", json={"token": token},
+                              headers={"Authorization": f"Bearer {other.token}"})
+        assert r.status_code == 200, r.text
 
     def create_monitor(self, **overrides) -> dict:
         """Create an HTTP monitor in region ``test-a`` (fields can be overridden) and return it."""

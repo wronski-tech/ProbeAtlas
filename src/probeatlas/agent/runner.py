@@ -60,7 +60,8 @@ class Agent:
         self.stop_event = threading.Event()
         self.capabilities = detect_capabilities()
         policy = NetworkPolicy.from_cidrs(
-            config.allowed_private_cidrs, allow_private_hostnames=bool(config.allowed_private_cidrs)
+            config.allowed_private_cidrs, allow_private_hostnames=bool(config.allowed_private_cidrs),
+            nameservers=config.nameservers,
         )
         self.ctx = CheckContext(
             policy=policy,

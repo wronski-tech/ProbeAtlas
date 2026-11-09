@@ -18,7 +18,9 @@ class AgentConfig:
 
     ``region``, ``country_code``, ``city``, and ``provider`` are labels the operator sets for where the agent
     runs; they are reported as configured and never inferred. ``allowed_private_cidrs`` opts into
-    monitoring private addresses and should stay empty for public agents.
+    monitoring private addresses and should stay empty for public agents. ``nameservers`` (comma-separated
+    IPs) replaces the host's resolver for every lookup; public agents should use public resolvers so the
+    hosting network's private or split-horizon zones are never consulted.
     """
 
     api_url: str
@@ -33,6 +35,7 @@ class AgentConfig:
     poll_interval_s: float
     heartbeat_interval_s: float
     allowed_private_cidrs: str
+    nameservers: str
     ca_file: str | None
 
     @classmethod
@@ -54,5 +57,6 @@ class AgentConfig:
             poll_interval_s=float(_env("PROBEATLAS_AGENT_POLL_INTERVAL", "2") or 2),
             heartbeat_interval_s=float(_env("PROBEATLAS_AGENT_HEARTBEAT_INTERVAL", "15") or 15),
             allowed_private_cidrs=_env("PROBEATLAS_AGENT_ALLOWED_PRIVATE_CIDRS", "") or "",
+            nameservers=_env("PROBEATLAS_AGENT_NAMESERVERS", "") or "",
             ca_file=_env("PROBEATLAS_AGENT_CA_FILE"),
         )

@@ -120,6 +120,28 @@ class ApiKey(Base):
     revoked_at: Mapped[datetime | None]
 
 
+class Invitation(Base):
+    """An owner's invitation for someone to join a workspace.
+
+    Joining requires the invitee to accept with their own signed-in account whose email matches. Only the
+    SHA-256 hash of the ``pai_`` token is stored.
+    """
+
+    __tablename__ = "invitations"
+    id: Mapped[uuid.UUID] = _id()
+    workspace_id: Mapped[uuid.UUID] = _ws_fk()
+    email: Mapped[str] = mapped_column(String(320))
+    role: Mapped[str] = mapped_column(String(20))
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = _created()
+    expires_at: Mapped[datetime]
+    accepted_at: Mapped[datetime | None]
+    accepted_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    revoked_at: Mapped[datetime | None]
+    __table_args__ = (CheckConstraint("role in ('owner','member')", name="invitation_role"),)
+
+
 # --- monitoring configuration -------------------------------------------------
 
 

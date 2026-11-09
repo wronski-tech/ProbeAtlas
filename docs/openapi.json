@@ -364,14 +364,16 @@
             }
           }
         }
-      },
+      }
+    },
+    "/v1/invitations": {
       "post": {
         "tags": [
           "auth & workspaces"
         ],
-        "summary": "Add Member",
-        "description": "Add a registered user to the workspace by email (owner only).",
-        "operationId": "add_member_v1_members_post",
+        "summary": "Create Invitation",
+        "description": "Invite someone to the workspace by email (owner only). The secret token is returned once.\n\nNobody is added until the invitee accepts with their own account, and the response is identical whether\nor not an account with this email exists. Invitations expire after 7 days; at most 50 can be pending.",
+        "operationId": "create_invitation_v1_invitations_post",
         "parameters": [
           {
             "name": "authorization",
@@ -412,7 +414,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/MemberAdd"
+                "$ref": "#/components/schemas/InvitationCreate"
               }
             }
           }
@@ -423,7 +425,206 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/MemberOut"
+                  "$ref": "#/components/schemas/InvitationIssued"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "auth & workspaces"
+        ],
+        "summary": "List Invitations",
+        "description": "List the workspace's pending invitations (owner only).",
+        "operationId": "list_invitations_v1_invitations_get",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "name": "x-workspace-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Workspace-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/InvitationOut"
+                  },
+                  "title": "Response List Invitations V1 Invitations Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/invitations/{invitation_id}": {
+      "delete": {
+        "tags": [
+          "auth & workspaces"
+        ],
+        "summary": "Revoke Invitation",
+        "description": "Revoke a pending invitation so its token can no longer be used (owner only).",
+        "operationId": "revoke_invitation_v1_invitations__invitation_id__delete",
+        "parameters": [
+          {
+            "name": "invitation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Invitation Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "name": "x-workspace-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Workspace-Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/invitations/accept": {
+      "post": {
+        "tags": [
+          "auth & workspaces"
+        ],
+        "summary": "Accept Invitation",
+        "description": "Join a workspace by accepting an invitation (session tokens only).\n\nThe invitation must be pending and addressed to the signed-in account's email. Unknown, expired,\nrevoked, used, and mismatched tokens all get the same 404.",
+        "operationId": "accept_invitation_v1_invitations_accept_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InvitationAccept"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceOut"
                 }
               }
             }
@@ -2626,7 +2827,7 @@
           "alerting"
         ],
         "summary": "List Channels",
-        "description": "List the workspace's notification channels. Signing secrets are not included.",
+        "description": "List the workspace's notification channels. Signing secrets are never included.\n\nOnly owners (user sessions) see full URLs. Members and API keys see the scheme and host, because\nwebhook paths often embed the receiver's secret token.",
         "operationId": "list_channels_v1_notification_channels_get",
         "parameters": [
           {
@@ -5014,6 +5215,126 @@
         "title": "IncidentOut",
         "description": "An incident: a period during which an alert rule was firing."
       },
+      "InvitationAccept": {
+        "properties": {
+          "token": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Token"
+          }
+        },
+        "type": "object",
+        "required": [
+          "token"
+        ],
+        "title": "InvitationAccept",
+        "description": "Accept an invitation with the signed-in account whose email it was sent to."
+      },
+      "InvitationCreate": {
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "title": "Email"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "owner",
+              "member"
+            ],
+            "title": "Role",
+            "default": "member"
+          }
+        },
+        "type": "object",
+        "required": [
+          "email"
+        ],
+        "title": "InvitationCreate",
+        "description": "Invite someone, by email, to join the workspace with a role. They must accept with that account."
+      },
+      "InvitationIssued": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "email": {
+            "type": "string",
+            "title": "Email"
+          },
+          "role": {
+            "type": "string",
+            "title": "Role"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At"
+          },
+          "token": {
+            "type": "string",
+            "title": "Token",
+            "description": "Invitation secret. Shown only once."
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "email",
+          "role",
+          "created_at",
+          "expires_at",
+          "token"
+        ],
+        "title": "InvitationIssued",
+        "description": "A new invitation including its secret ``token`` (shown only once).\n\nShare the token, or the dashboard link ``/invite/<token>``, with the invitee out of band. The response\nis the same whether or not an account with this email exists."
+      },
+      "InvitationOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "email": {
+            "type": "string",
+            "title": "Email"
+          },
+          "role": {
+            "type": "string",
+            "title": "Role"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "email",
+          "role",
+          "created_at",
+          "expires_at"
+        ],
+        "title": "InvitationOut",
+        "description": "A pending invitation."
+      },
       "JobSpec": {
         "properties": {
           "job_id": {
@@ -5772,30 +6093,6 @@
         ],
         "title": "MeasurementResult",
         "description": "Result of executing one job. ``schema_version`` 1."
-      },
-      "MemberAdd": {
-        "properties": {
-          "email": {
-            "type": "string",
-            "format": "email",
-            "title": "Email"
-          },
-          "role": {
-            "type": "string",
-            "enum": [
-              "owner",
-              "member"
-            ],
-            "title": "Role",
-            "default": "member"
-          }
-        },
-        "type": "object",
-        "required": [
-          "email"
-        ],
-        "title": "MemberAdd",
-        "description": "Add an existing user, by email, to the workspace with a role."
       },
       "MemberOut": {
         "properties": {

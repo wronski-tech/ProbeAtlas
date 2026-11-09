@@ -1,0 +1,7 @@
+# Server and agent images copy only these paths; everything else (web/node_modules,
+# .venv, .next, .git) would otherwise be uploaded as build context on every build.
+*
+!pyproject.toml
+!README.md
+!src/
+**/__pycache__

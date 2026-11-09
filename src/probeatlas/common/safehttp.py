@@ -105,7 +105,7 @@ def connect_checked(
     """Resolve, validate, and connect. Returns (sock, ip, dns_ms, connect_ms)."""
     t0 = time.perf_counter()
     try:
-        addrs = resolve_checked(host, port, policy, timeout_s=deadline - t0)
+        addrs = resolve_checked(host, policy, timeout_s=deadline - t0)
     except ResolutionError as exc:
         if exc.timeout:
             raise CheckError(FailureCategory.TIMEOUT, "DNS resolution timed out") from exc

@@ -10,7 +10,7 @@ import sys
 from datetime import UTC, datetime
 
 # Never let bearer tokens or our secret formats reach the logs.
-_SECRET_RE = re.compile(r"(pa[kseha]_[A-Za-z0-9_\-]{8,})|((?i:bearer)\s+[A-Za-z0-9._\-]+)")
+_SECRET_RE = re.compile(r"(pa[ksehai]_[A-Za-z0-9_\-]{8,})|((?i:bearer)\s+[A-Za-z0-9._\-]+)")
 
 
 def redact(text: str) -> str:

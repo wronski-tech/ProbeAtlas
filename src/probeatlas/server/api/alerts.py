@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import and_, func, or_, select
@@ -168,11 +169,24 @@ def _check_url(url: str, settings: Settings) -> str:
                        ) from exc
 
 
+def _masked_url(url: str) -> str:
+    """Keep only the scheme and host of a webhook URL; paths and queries often carry receiver tokens."""
+    parts = urlsplit(url)
+    return f"{parts.scheme}://{parts.netloc}/…"
+
+
 @router.get("/notification-channels", response_model=list[ChannelOut])
 def list_channels(p: Principal = Depends(get_principal), db: Session = Depends(get_db)):
-    """List the workspace's notification channels. Signing secrets are not included."""
-    return db.execute(select(NotificationChannel).where(NotificationChannel.workspace_id == p.workspace_id)
+    """List the workspace's notification channels. Signing secrets are never included.
+
+    Only owners (user sessions) see full URLs. Members and API keys see the scheme and host, because
+    webhook paths often embed the receiver's secret token.
+    """
+    rows = db.execute(select(NotificationChannel).where(NotificationChannel.workspace_id == p.workspace_id)
                       .order_by(NotificationChannel.created_at)).scalars().all()
+    full = p.actor_type == "user" and p.is_owner
+    return [ChannelOut.model_validate(c) if full else
+            ChannelOut.model_validate(c).model_copy(update={"url": _masked_url(c.url)}) for c in rows]
 
 
 @router.post("/notification-channels", response_model=ChannelIssued, status_code=201)
