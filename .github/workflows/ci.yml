@@ -87,7 +87,12 @@ jobs:
         working-directory: deploy/terraform/staging
         run: |
           terraform fmt -check -recursive
-          terraform init -backend=false -input=false
+          # The OpenStack provider is downloaded from GitHub releases, which intermittently answer 504.
+          for attempt in 1 2 3 4 5; do
+            terraform init -backend=false -input=false && break
+            [ "$attempt" = 5 ] && exit 1
+            sleep $((attempt * 15))
+          done
           terraform validate
       - name: Shell scripts
         run: |
@@ -104,8 +109,9 @@ jobs:
     name: Container images build
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    # Only images whose code passed every check are published.
-    needs: [backend, web, deploy]
+    # Only images whose code passed the backend and web checks are published. (The deployment-config job
+    # does not test image contents, so an outage at a Terraform provider host cannot block publishing.)
+    needs: [backend, web]
     permissions:
       contents: read
       packages: write # push to GHCR (main only)
