@@ -63,10 +63,12 @@ browsers, API clients, agents ──HTTPS──▶ Caddy :443 ─┬─ app.<dom
 3. **Terraform ≥ 1.10.**
 4. **A private, versioned S3 bucket for Terraform state.** State contains the database password and the
    enrollment tokens.
-5. **Public GHCR images.** The packages are created by the first CI run on `main`. On GitHub, open each of
-   `probeatlas-server`, `probeatlas-agent`, and `probeatlas-web` under the account's **Packages** tab, go to
-   **Package settings → Change visibility**, and choose **Public**. This is a one-time step. Check it with
-   `docker pull ghcr.io/wronski-tech/probeatlas-agent:main` from a machine that is not logged in to GHCR.
+5. **Public GHCR images.** CI publishes them on every green push to `main`. They are linked to the public
+   repository and pull without credentials. Check with `docker pull ghcr.io/wronski-tech/probeatlas-agent:main`
+   on a machine that is not logged in to GHCR.
+   - If you add a new image, GHCR can answer `denied` to the very first push that creates its package.
+     Re-run the job: the package then exists and accepts the push. That is what happened when these three
+     packages were first published.
 
 ## Phase 1: control plane
 
