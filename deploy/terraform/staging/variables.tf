@@ -19,6 +19,12 @@ variable "acme_email" {
   type        = string
 }
 
+variable "contact_email" {
+  description = "Public contact for access requests and abuse reports, shown on the landing and /probes pages (defaults to acme_email)."
+  type        = string
+  default     = null
+}
+
 variable "image_tag" {
   description = "Full commit SHA whose images CI published to GHCR; deployed at first boot."
   type        = string

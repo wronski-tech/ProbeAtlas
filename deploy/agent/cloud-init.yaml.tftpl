@@ -22,6 +22,7 @@ write_files:
       PROBEATLAS_AGENT_CITY=${city}
       PROBEATLAS_AGENT_PROVIDER=${network}
       PROBEATLAS_AGENT_NAMESERVERS=${nameservers}
+      PROBEATLAS_AGENT_INFO_URL=${info_url}
   - path: /etc/probeatlas/agent-image.env
     permissions: "0644"
     content: |

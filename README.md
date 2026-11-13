@@ -67,7 +67,7 @@ docker compose ps                # api should be "healthy", agents "running"
 
 | Service | URL |
 | --- | --- |
-| Dashboard | http://localhost:3000 |
+| Landing page · dashboard | http://localhost:3000 · http://localhost:3000/dashboard |
 | API + OpenAPI UI | http://localhost:8000/docs |
 | Worker / API metrics (internal) | http://localhost:9100/metrics · http://localhost:9101/metrics |
 | Demo target control | http://localhost:18081/control |
@@ -80,7 +80,7 @@ hand: `docker compose run --rm migrate` (or `probeatlas-admin migrate` with
 
 ### Demo walkthrough
 
-1. Open http://localhost:3000, register, and you land in your workspace. (Compose enables open sign-up
+1. Open http://localhost:3000/register, register, and you land in your workspace dashboard (`/dashboard`). (Compose enables open sign-up
    for local development; production defaults to invite-only, see [operations](docs/operations.md#onboarding-customers-invite-only-sign-up).)
 2. **New monitor** → type HTTP, URL `http://demo-target:8080/`, regions
    `dev-local-a` and `dev-local-b`, interval 10 s. Keep the default alert rule.
@@ -206,7 +206,12 @@ Agent (`PROBEATLAS_AGENT_*` plus `PROBEATLAS_API_URL`): `REGION` (required),
 `ENROLLMENT_TOKEN`, `NAME`, `COUNTRY_CODE`, `CITY`, `PROVIDER`, `STATE_FILE`,
 `CONCURRENCY` (8), `POLL_INTERVAL` (2 s), `HEARTBEAT_INTERVAL` (15 s),
 `ALLOWED_PRIVATE_CIDRS` (empty), `NAMESERVERS` (empty = host resolver; use public resolvers in
-production). See [docs/operations.md](docs/operations.md#running-an-agent).
+production), `INFO_URL` (empty; a page about the probes, such as `https://<app domain>/probes`, appended to
+the User-Agent as `ProbeAtlas-Agent/<version> (+<url>)`). See [docs/operations.md](docs/operations.md#running-an-agent).
+
+Web: `PROBEATLAS_CONTACT_EMAIL` (empty) is the public contact for access requests and abuse reports,
+shown on the landing page (`/`) and the probe information page (`/probes`). Without it those pages
+show no contact address.
 
 ## Current limitations
 

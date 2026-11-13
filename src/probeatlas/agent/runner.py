@@ -27,6 +27,12 @@ log = logging.getLogger("probeatlas.agent")
 MAX_BUFFERED_RESULTS = 2000
 
 
+
+def user_agent(config: AgentConfig) -> str:
+    """Return the HTTP User-Agent for checks: product and version, plus the operator's info page if set."""
+    base = f"ProbeAtlas-Agent/{__version__}"
+    return f"{base} (+{config.info_url})" if config.info_url else base
+
 class Backoff:
     """Exponential backoff with jitter for reconnecting to the control plane."""
 
@@ -66,7 +72,7 @@ class Agent:
         self.ctx = CheckContext(
             policy=policy,
             capabilities=self.capabilities,
-            user_agent=f"ProbeAtlas-Agent/{__version__} (+https://probeatlas.dev/agent)",
+            user_agent=user_agent(config),
             ca_file=config.ca_file,
         )
         self.pool = ThreadPoolExecutor(max_workers=config.concurrency, thread_name_prefix="check")

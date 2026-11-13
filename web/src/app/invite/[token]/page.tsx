@@ -26,7 +26,7 @@ export default function InvitePage() {
         headers: { "Content-Type": "application/json", "x-probeatlas-csrf": "1" },
         body: JSON.stringify({ workspace_id: ws.id }),
       });
-      router.push("/");
+      router.push("/dashboard");
       router.refresh();
     } catch (e) {
       // A signed-out visitor is sent to sign in by api() and returned here afterwards.

@@ -75,7 +75,7 @@ browsers, API clients, agents ──HTTPS──▶ Caddy :443 ─┬─ app.<dom
 ```bash
 cd deploy/terraform/staging
 cp backend.hcl.example backend.hcl            # fill in the state bucket
-cp terraform.tfvars.example terraform.tfvars  # domains, image_tag (a main commit SHA), SSH key, Azure/GCP ids
+cp terraform.tfvars.example terraform.tfvars  # domains, image_tag (a main commit SHA), SSH key, Azure/GCP ids, contact_email
 terraform init -backend-config=backend.hcl
 git add .terraform.lock.hcl                   # commit the provider lock file from the first init
 terraform apply
@@ -87,7 +87,8 @@ With no `agent_enrollment_tokens`, this creates only the AWS control plane. Then
    Caddy obtains certificates as soon as the names resolve; it retries on its own.
 2. Wait about 5 minutes for the first boot, then check:
    `curl https://<api_domain>/readyz` should return `{"status":"ready"}`, and `https://<app_domain>` should
-   show the sign-in page.
+   show the landing page. Its contact address is `contact_email` (default: `acme_email`); agents send
+   `https://<app_domain>/probes` in their User-Agent automatically.
 3. Open a shell on the host without SSH:
    `aws ssm start-session --target $(terraform output -raw control_plane_instance_id)`, or SSH from
    `operator_cidrs`. Useful commands, run in `/opt/probeatlas` with `sudo`:

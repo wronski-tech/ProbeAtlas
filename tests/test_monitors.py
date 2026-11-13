@@ -179,6 +179,25 @@ def test_locations_and_agents_listing(account, agent_a, agent_b):
     assert "token_hash" not in agents[0]
 
 
+def test_public_locations_need_no_auth_and_expose_only_labels(client, account, agent_a, agent_b, db):
+    from sqlalchemy import text
+
+    db.execute(text("UPDATE agents SET provider = 'Example Cloud (AS64500)' WHERE region = 'test-a'"))
+    db.commit()
+    r = client.get("/v1/public/locations")
+    assert r.status_code == 200
+    locs = r.json()
+    assert locs == account.get("/v1/locations").json()  # same data as the authenticated list
+    assert [loc["region"] for loc in locs] == ["test-a", "test-b"]
+    assert locs[0]["providers"] == ["Example Cloud (AS64500)"] and locs[1]["providers"] == []
+    assert set(locs[0]) == {"region", "country_codes", "cities", "agents_total", "agents_online", "capabilities",
+                            "providers"}  # no agent ids, names, or addresses
+    # Disabled agents are not advertised.
+    db.execute(text("UPDATE agents SET status = 'disabled' WHERE region = 'test-b'"))
+    db.commit()
+    assert [loc["region"] for loc in client.get("/v1/public/locations").json()] == ["test-a"]
+
+
 def test_openapi_published(client):
     spec = client.get("/openapi.json").json()
     assert spec["info"]["title"] == "ProbeAtlas API"

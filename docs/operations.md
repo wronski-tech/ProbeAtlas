@@ -51,6 +51,7 @@ docker run -d --name probeatlas-agent --restart unless-stopped \
   -e PROBEATLAS_AGENT_CITY=Frankfurt \
   -e PROBEATLAS_AGENT_PROVIDER="Hetzner AS24940" \
   -e PROBEATLAS_AGENT_NAMESERVERS=1.1.1.1,8.8.8.8 \
+  -e PROBEATLAS_AGENT_INFO_URL=https://app.probeatlas.example/probes \
   probeatlas-agent:<version>
 ```
 
@@ -63,6 +64,9 @@ docker run -d --name probeatlas-agent --restart unless-stopped \
   hosting network's private or split-horizon zones. Leave it empty only where the
   host resolver is needed, such as the local compose demo, which relies on Docker DNS for
   `demo-target`.
+* Set `PROBEATLAS_AGENT_INFO_URL` to the dashboard's `/probes` page so the owner of a monitored
+  server can see from the User-Agent (`ProbeAtlas-Agent/<version> (+<url>)`) who is sending the
+  requests and how to reach you. The page shows `PROBEATLAS_CONTACT_EMAIL` from the web service.
 * Location fields are operator assertions shown to customers. Do not infer them
   from IP geolocation.
 * Agents need outbound HTTPS to the API and outbound access to targets; they

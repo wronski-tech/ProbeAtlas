@@ -31,6 +31,7 @@ Base URL: `http://localhost:8000` locally. Interactive documentation is served a
 | Analytics | `GET /v1/monitors/{id}/regional-performance`, `GET /v1/monitors/{id}/timeseries`, `GET /v1/monitors/{id}/events`, `GET /v1/overview` |
 | Measurements | `GET /v1/measurements?monitor_id&region&agent_id&check_type&success&since&until&limit&cursor` |
 | Locations | `GET /v1/locations`, `GET /v1/agents` |
+| Public (no auth, 60 requests/min per IP) | `GET /v1/public/locations`: the same region labels, agent counts, providers, and check types as `/v1/locations`, used by the landing page |
 | Alerting | `GET/POST /v1/alert-rules`, `GET/PATCH/DELETE /v1/alert-rules/{id}`, `GET /v1/incidents`, `GET /v1/incidents/{id}` |
 | Notifications | `GET/POST /v1/notification-channels`, `PATCH/DELETE /v1/notification-channels/{id}`, `POST /v1/notification-channels/{id}/test`, `GET /v1/notification-deliveries` |
 | Audit (owner) | `GET /v1/audit-events` |

@@ -3424,6 +3424,33 @@
         }
       }
     },
+    "/v1/public/locations": {
+      "get": {
+        "tags": [
+          "agents",
+          "public"
+        ],
+        "summary": "Public Locations",
+        "description": "Monitoring locations this deployment actually runs, for anyone (no authentication).\n\nThe same data as ``GET /v1/locations``: operator-configured region, country, city, and provider labels\nwith live agent counts. No agent IDs, names, or addresses. Rate limited per client IP (60/minute).",
+        "operationId": "public_locations_v1_public_locations_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/LocationOut"
+                  },
+                  "type": "array",
+                  "title": "Response Public Locations V1 Public Locations Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/overview": {
       "get": {
         "tags": [
@@ -5501,6 +5528,14 @@
             },
             "type": "array",
             "title": "Capabilities"
+          },
+          "providers": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Providers",
+            "description": "Network or provider labels the agents' operator configured."
           }
         },
         "type": "object",

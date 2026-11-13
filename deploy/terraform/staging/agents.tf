@@ -28,6 +28,7 @@ locals {
       city             = a.city
       network          = a.network
       nameservers      = "1.1.1.1,8.8.8.8"
+      info_url         = "https://${var.app_domain}/probes"
       image_repo       = var.image_repo
       image_tag        = coalesce(var.agent_image_tag, var.image_tag)
       agent_run_b64    = filebase64("${path.module}/../../agent/probeatlas-agent-run")

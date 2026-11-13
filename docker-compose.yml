@@ -99,6 +99,8 @@ services:
       # Browsers connect directly here, so X-Forwarded-For cannot be trusted (0). Behind a TLS load
       # balancer that appends to X-Forwarded-For, set 1.
       PROBEATLAS_WEB_TRUSTED_PROXY_HOPS: ${PROBEATLAS_WEB_TRUSTED_PROXY_HOPS:-0}
+      # Shown on the landing page and /probes (access requests, abuse reports).
+      PROBEATLAS_CONTACT_EMAIL: ${PROBEATLAS_CONTACT_EMAIL:-}
     ports: ["3000:3000"]
     depends_on:
       api: { condition: service_healthy }
@@ -114,6 +116,7 @@ services:
       PROBEATLAS_AGENT_NAME: local-agent-a
       PROBEATLAS_AGENT_REGION: dev-local-a
       PROBEATLAS_AGENT_PROVIDER: docker-compose
+      PROBEATLAS_AGENT_INFO_URL: http://localhost:3000/probes
       # Only the demo target network is reachable; db/api addresses stay blocked.
       PROBEATLAS_AGENT_ALLOWED_PRIVATE_CIDRS: 10.203.10.0/24
     volumes: [agent-a-state:/var/lib/probeatlas-agent]
@@ -129,6 +132,7 @@ services:
       PROBEATLAS_AGENT_NAME: local-agent-b
       PROBEATLAS_AGENT_REGION: dev-local-b
       PROBEATLAS_AGENT_PROVIDER: docker-compose
+      PROBEATLAS_AGENT_INFO_URL: http://localhost:3000/probes
       PROBEATLAS_AGENT_ALLOWED_PRIVATE_CIDRS: 10.203.10.0/24
     volumes: [agent-b-state:/var/lib/probeatlas-agent]
     networks:

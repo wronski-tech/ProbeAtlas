@@ -2,6 +2,7 @@
 app_domain     = "app.staging.example.com"
 api_domain     = "api.staging.example.com"
 acme_email     = "ops@example.com"
+# contact_email = "abuse@example.com"   # shown publicly on / and /probes; defaults to acme_email
 image_tag      = "0000000000000000000000000000000000000000" # full SHA of a main commit CI published
 ssh_public_key = "ssh-ed25519 AAAA... operator@laptop"
 operator_cidrs = ["203.0.113.10/32"] # or [] to keep SSH closed (AWS Session Manager still works)

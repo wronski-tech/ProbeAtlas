@@ -140,6 +140,7 @@ export type Location = {
   agents_total: number;
   agents_online: number;
   capabilities: string[];
+  providers: string[];
 };
 
 export type Overview = {

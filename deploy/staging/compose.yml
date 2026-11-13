@@ -5,7 +5,8 @@
 #
 # Expected files:
 #   .env next to this file (compose variables): PROBEATLAS_TAG (written by probeatlas-deploy),
-#     PROBEATLAS_APP_DOMAIN, PROBEATLAS_API_DOMAIN, PROBEATLAS_ACME_EMAIL, optionally PROBEATLAS_IMAGE_REPO.
+#     PROBEATLAS_APP_DOMAIN, PROBEATLAS_API_DOMAIN, PROBEATLAS_ACME_EMAIL, optionally PROBEATLAS_IMAGE_REPO and
+#     PROBEATLAS_CONTACT_EMAIL (defaults to the ACME address).
 #   /etc/probeatlas/control-plane.env (mode 0600): PROBEATLAS_* server settings including
 #     PROBEATLAS_DATABASE_URL. Only the server containers read it; Caddy and web never see it.
 
@@ -57,6 +58,8 @@ services:
       PROBEATLAS_API_URL: http://api:8000
       # Caddy is the one proxy in front of the web server; it sets X-Forwarded-For to the client address.
       PROBEATLAS_WEB_TRUSTED_PROXY_HOPS: "1"
+      # Public contact for access requests and abuse reports (landing page and /probes).
+      PROBEATLAS_CONTACT_EMAIL: ${PROBEATLAS_CONTACT_EMAIL:-${PROBEATLAS_ACME_EMAIL:?set PROBEATLAS_ACME_EMAIL}}
     read_only: true
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]

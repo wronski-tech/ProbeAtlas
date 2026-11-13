@@ -283,6 +283,7 @@ resource "aws_instance" "control_plane" {
     app_domain         = var.app_domain
     api_domain         = var.api_domain
     acme_email         = var.acme_email
+    contact_email      = coalesce(var.contact_email, var.acme_email)
     image_repo         = var.image_repo
     image_tag          = var.image_tag
     deploy_b64         = filebase64("${path.module}/../../staging/host/probeatlas-deploy")

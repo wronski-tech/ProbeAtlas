@@ -40,9 +40,8 @@ def list_agents(p: Principal = Depends(get_principal), db: Session = Depends(get
     return db.execute(select(Agent).where(Agent.status != "disabled").order_by(Agent.region, Agent.name)).scalars()
 
 
-@router.get("/locations", response_model=list[LocationOut])
-def list_locations(p: Principal = Depends(get_principal), db: Session = Depends(get_db)):
-    """Regions that monitors can select, with current agent availability."""
+def _locations(db: Session) -> list[LocationOut]:
+    """Aggregate enabled agents into regions with their labels, availability, and online capabilities."""
     out: dict[str, LocationOut] = {}
     for a in db.execute(select(Agent).where(Agent.status != "disabled")).scalars():
         loc = out.setdefault(a.region, LocationOut(region=a.region, country_codes=[], cities=[], agents_total=0,
@@ -53,9 +52,28 @@ def list_locations(p: Principal = Depends(get_principal), db: Session = Depends(
             loc.country_codes.append(a.country_code)
         if a.city and a.city not in loc.cities:
             loc.cities.append(a.city)
+        if a.provider and a.provider not in loc.providers:
+            loc.providers.append(a.provider)
         if a.status == "online":
             loc.capabilities = sorted(set(loc.capabilities) | set(a.capabilities))
     return sorted(out.values(), key=lambda loc: loc.region)
+
+
+@router.get("/locations", response_model=list[LocationOut])
+def list_locations(p: Principal = Depends(get_principal), db: Session = Depends(get_db)):
+    """Regions that monitors can select, with current agent availability."""
+    return _locations(db)
+
+
+@router.get("/public/locations", response_model=list[LocationOut], tags=["public"])
+def public_locations(request: Request, db: Session = Depends(get_db)):
+    """Monitoring locations this deployment actually runs, for anyone (no authentication).
+
+    The same data as ``GET /v1/locations``: operator-configured region, country, city, and provider labels
+    with live agent counts. No agent IDs, names, or addresses. Rate limited per client IP (60/minute).
+    """
+    limiter.hit(f"public:{client_ip(request)}", 60)
+    return _locations(db)
 
 
 # --- agent protocol -------------------------------------------------------------

@@ -7,7 +7,7 @@ import { cx } from "./ui";
 type Ws = { id: string; name: string; role: string | null };
 
 const NAV = [
-  { href: "/", label: "Dashboard" },
+  { href: "/dashboard", label: "Dashboard" },
   { href: "/monitors", label: "Monitors" },
   { href: "/measurements", label: "Measurements" },
   { href: "/incidents", label: "Incidents" },
@@ -27,7 +27,7 @@ export function Sidebar({ user, workspaces, current }: { user: { name: string; e
       headers: { "Content-Type": "application/json", "x-probeatlas-csrf": "1" },
       body: JSON.stringify({ workspace_id: id }),
     });
-    router.push("/");
+    router.push("/dashboard");
     router.refresh();
   }
 
@@ -41,7 +41,7 @@ export function Sidebar({ user, workspaces, current }: { user: { name: string; e
   return (
     <aside className="flex w-full shrink-0 flex-col border-b border-slate-200 bg-white md:h-screen md:w-56 md:border-b-0 md:border-r">
       <div className="px-4 py-4">
-        <Link href="/" className="text-base font-semibold tracking-tight text-slate-900">
+        <Link href="/dashboard" className="text-base font-semibold tracking-tight text-slate-900">
           ProbeAtlas
         </Link>
         <label className="mt-3 block">
@@ -61,7 +61,7 @@ export function Sidebar({ user, workspaces, current }: { user: { name: string; e
       </div>
       <nav aria-label="Main" className="flex gap-1 overflow-x-auto px-2 pb-2 md:flex-1 md:flex-col md:overflow-visible">
         {NAV.map((n) => {
-          const active = n.href === "/" ? path === "/" : path.startsWith(n.href);
+          const active = path.startsWith(n.href);
           return (
             <Link
               key={n.href}

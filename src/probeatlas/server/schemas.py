@@ -657,6 +657,8 @@ class LocationOut(BaseModel):
     agents_total: int
     agents_online: int
     capabilities: list[str]
+    providers: list[str] = Field(default_factory=list,
+                                 description="Network or provider labels the agents' operator configured.")
 
 
 class AuditEventOut(ORM):

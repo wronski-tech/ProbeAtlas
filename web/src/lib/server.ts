@@ -1,5 +1,6 @@
 import { cookies, headers as requestHeaders } from "next/headers";
 import { clientIpFromForwardedFor } from "./proxy";
+import type { Location } from "./types";
 
 export const API_URL = process.env.PROBEATLAS_API_URL ?? "http://localhost:8000";
 export const SESSION_COOKIE = "pa_session";
@@ -51,4 +52,30 @@ export async function sessionContext(): Promise<{ me: Me; workspace: Workspace }
   const workspace = me.workspaces.find((w) => w.id === selected) ?? me.workspaces[0];
   if (!workspace) return null;
   return { me, workspace };
+}
+
+/**
+ * Public contact address for access requests and abuse reports (`PROBEATLAS_CONTACT_EMAIL`), or null when the
+ * operator has not configured one. Read at request time, so pages that use it must render dynamically.
+ */
+export function contactEmail(): string | null {
+  return process.env.PROBEATLAS_CONTACT_EMAIL?.trim() || null;
+}
+
+/** Whether the browser sends a session cookie. Not validated: only picks "Open dashboard" over "Sign in". */
+export async function hasSessionCookie(): Promise<boolean> {
+  return (await cookies()).has(SESSION_COOKIE);
+}
+
+/**
+ * The monitoring locations this deployment runs, from the public API, or null when the API is unreachable.
+ * Cached for 30 seconds so visitors share one upstream request (the endpoint is rate limited per IP).
+ */
+export async function publicLocations(): Promise<Location[] | null> {
+  try {
+    const res = await fetch(`${API_URL}/v1/public/locations`, { next: { revalidate: 30 } });
+    return res.ok ? ((await res.json()) as Location[]) : null;
+  } catch {
+    return null;
+  }
 }

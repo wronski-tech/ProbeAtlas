@@ -12,6 +12,7 @@ import time
 import pytest
 from sqlalchemy import text
 
+from probeatlas import __version__
 from probeatlas.agent.client import ControlPlaneClient, TransientError
 from probeatlas.agent.config import AgentConfig
 from probeatlas.agent.runner import Agent
@@ -26,6 +27,7 @@ def make_agent(client, tmp_path, region="test-a") -> Agent:
         country_code="PL", city="Warsaw", provider="local-dev", state_file=str(tmp_path / f"{region}.json"),
         concurrency=4, poll_interval_s=0.1, heartbeat_interval_s=0.5,
         allowed_private_cidrs="127.0.0.0/8,::1/128", nameservers="", ca_file=None,
+        info_url="https://app.example.test/probes",
     )
     cp = ControlPlaneClient(cfg.api_url)
     cp._http = client  # route agent traffic into the in-process ASGI app
@@ -64,7 +66,9 @@ def test_end_to_end_monitoring_workflow(client, account, target_server, tmp_path
         res = items[0]
         assert res["success"] and res["http_status"] == 200 and res["agent_id"] == agent.client.agent_id
         assert res["dns_ms"] is not None and res["connect_ms"] is not None and res["ttfb_ms"] is not None
-        assert target_server.requests[-1]["headers"]["User-Agent"].startswith("ProbeAtlas-Agent/")
+        # Owners of monitored servers can see who is checking them and where to read about it.
+        assert target_server.requests[-1]["headers"]["User-Agent"] == (
+            f"ProbeAtlas-Agent/{__version__} (+https://app.example.test/probes)")
         assert account.get(f"/v1/monitors/{m['id']}").json()["state"] == "up"
 
         target_server.status = 503
@@ -150,3 +154,16 @@ def test_agent_graceful_shutdown(client, account, target_server, tmp_path, setti
     assert not t.is_alive()
     items = account.get("/v1/measurements").json()["items"]
     assert len(items) == 1 and items[0]["success"]  # in-flight check finished and was flushed
+
+
+def test_agent_info_url_must_be_a_plain_http_url(monkeypatch):
+    monkeypatch.setenv("PROBEATLAS_AGENT_REGION", "test-a")
+    monkeypatch.setenv("PROBEATLAS_AGENT_INFO_URL", "https://app.example.test/probes")
+    assert AgentConfig.from_env().info_url == "https://app.example.test/probes"
+    # Header injection, spaces, and comment-breaking parentheses are refused at startup.
+    for bad in ("app.example.test/probes", "https://x.test/a b", "https://x.test/)\r\nX-Evil: 1", "javascript:x"):
+        monkeypatch.setenv("PROBEATLAS_AGENT_INFO_URL", bad)
+        with pytest.raises(SystemExit):
+            AgentConfig.from_env()
+    monkeypatch.delenv("PROBEATLAS_AGENT_INFO_URL")
+    assert AgentConfig.from_env().info_url is None

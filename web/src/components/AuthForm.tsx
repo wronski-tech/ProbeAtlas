@@ -8,7 +8,7 @@ import { Button, ErrorBanner, Field, Input } from "./ui";
 /** Where to go after signing in: a same-site path from `?next=` (for example an invitation), else the dashboard. */
 function nextPath(): string {
   const next = new URLSearchParams(window.location.search).get("next");
-  return next && next.startsWith("/") && !next.startsWith("//") && !next.startsWith("/\\") ? next : "/";
+  return next && next.startsWith("/") && !next.startsWith("//") && !next.startsWith("/\\") ? next : "/dashboard";
 }
 
 /** Sign-in or registration form. The session token is kept in an httpOnly cookie by the server route. */
@@ -22,7 +22,7 @@ export function AuthForm({ mode }: { mode: "login" | "register" }) {
   const [invitation, setInvitation] = useState<string | null>(null);
   useEffect(() => {
     const next = nextPath();
-    if (next !== "/") setNextQuery(`?next=${encodeURIComponent(next)}`);
+    if (next !== "/dashboard") setNextQuery(`?next=${encodeURIComponent(next)}`);
     setInvitation(/^\/invite\/(pai_[A-Za-z0-9_-]+)$/.exec(next)?.[1] ?? null);
   }, []);
   const joining = mode === "register" && invitation !== null;
@@ -46,7 +46,7 @@ export function AuthForm({ mode }: { mode: "login" | "register" }) {
       return;
     }
     // A new account made from an invitation is already a member: go to the joined workspace.
-    router.push(joining ? "/" : nextPath());
+    router.push(joining ? "/dashboard" : nextPath());
     router.refresh();
   }
 
